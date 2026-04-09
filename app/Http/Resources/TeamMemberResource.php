@@ -11,12 +11,13 @@ class TeamMemberResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'user' => [
-                'name' => $this->name,
-                'email' => $this->email,
-            ],
-            'role' => $this->pivot->role,
-            'joined_at' => $this->pivot->created_at,
+            'name' => $this->name,
+            'phone' => $this->phone,
+            'email' => $this->email,
+            'role' => $this->role,
+            'has_account' => $this->user_id !== null,
+            'user_id' => $this->user_id,
+            'created_at' => $this->created_at,
         ];
     }
 }

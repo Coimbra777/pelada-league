@@ -4,49 +4,57 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\AddTeamMemberRequest;
+use App\Http\Resources\TeamMemberResource;
 use App\Models\Team;
-use App\Models\User;
+use App\Models\TeamMember;
+use App\Services\TeamMemberService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 
 class TeamMemberController extends Controller
 {
-    public function store(AddTeamMemberRequest $request, Team $team): JsonResponse
+    public function store(AddTeamMemberRequest $request, Team $team, TeamMemberService $service): JsonResponse
     {
         /** @var \App\Models\User $authUser */
         $authUser = Auth::user();
 
         $membership = $team->members()->where('user_id', $authUser->id)->first();
-        if (!$membership || $membership->pivot->role !== 'admin') {
+        if (!$membership || $membership->role !== 'admin') {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        $userId = $request->validated()['user_id'];
+        $data = $request->validated();
 
-        if ($team->members()->where('user_id', $userId)->exists()) {
-            return response()->json(['message' => 'User is already a member.'], 422);
+        if ($team->members()->where('phone', $data['phone'])->exists()) {
+            return response()->json(['message' => 'Member with this phone already exists.'], 422);
         }
 
-        $team->members()->attach($userId, ['role' => 'member']);
+        $member = $service->createMember($team, $data);
 
-        return response()->json(['message' => 'Member added.'], 201);
+        return response()->json([
+            'member' => new TeamMemberResource($member),
+        ], 201);
     }
 
-    public function destroy(Team $team, User $user): JsonResponse
+    public function destroy(Team $team, TeamMember $member): JsonResponse
     {
         /** @var \App\Models\User $authUser */
         $authUser = Auth::user();
 
         $membership = $team->members()->where('user_id', $authUser->id)->first();
-        if (!$membership || $membership->pivot->role !== 'admin') {
+        if (!$membership || $membership->role !== 'admin') {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        if ($user->id === $team->owner_id) {
+        if ($member->team_id !== $team->id) {
+            return response()->json(['message' => 'Not found.'], 404);
+        }
+
+        if ($member->user_id === $team->owner_id) {
             return response()->json(['message' => 'Cannot remove the team owner.'], 422);
         }
 
-        $team->members()->detach($user->id);
+        $member->delete();
 
         return response()->json(['message' => 'Member removed.']);
     }

@@ -2,6 +2,7 @@
 
 namespace App\Services\Asaas;
 
+use App\Models\TeamMember;
 use App\Models\User;
 
 class AsaasCustomerService
@@ -22,6 +23,25 @@ class AsaasCustomerService
         ]);
 
         $response = $this->client->post('/customers', $payload);
+
+        return $response['id'];
+    }
+
+    public function createForMember(TeamMember $member): string
+    {
+        if ($member->asaas_customer_id) {
+            return $member->asaas_customer_id;
+        }
+
+        $payload = array_filter([
+            'name' => $member->name,
+            'email' => $member->email,
+            'mobilePhone' => $member->phone,
+        ]);
+
+        $response = $this->client->post('/customers', $payload);
+
+        $member->update(['asaas_customer_id' => $response['id']]);
 
         return $response['id'];
     }

@@ -31,7 +31,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/{team}/dashboard', [TeamController::class, 'dashboard']);
 
             Route::post('/{team}/members', [TeamMemberController::class, 'store']);
-            Route::delete('/{team}/members/{user}', [TeamMemberController::class, 'destroy']);
+            Route::delete('/{team}/members/{member}', [TeamMemberController::class, 'destroy']);
 
             Route::post('/{team}/expenses', [ExpenseController::class, 'store']);
             Route::get('/{team}/expenses', [ExpenseController::class, 'index']);
@@ -39,7 +39,7 @@ Route::prefix('v1')->group(function () {
         });
     });
 
-    Route::prefix('webhooks')->group(function () {
+    Route::prefix('webhooks')->middleware('throttle:webhook')->group(function () {
         Route::post('/asaas', [WebhookController::class, 'asaas']);
     });
 

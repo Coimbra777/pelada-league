@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
 import { useAuthStore } from '../../Stores/auth.js';
 import { useTeamStore } from '../../Stores/teams.js';
@@ -23,10 +23,10 @@ const expenseStore = useExpenseStore();
 const toast = useToast();
 
 const showAddMember = ref(false);
-const newMemberId = ref('');
+const newMember = reactive({ name: '', phone: '', email: '' });
 
 const isAdmin = computed(() => {
-    return teamStore.members.find(m => m.id === authStore.user?.id)?.role === 'admin';
+    return teamStore.members.find(m => m.user_id === authStore.user?.id)?.role === 'admin';
 });
 
 onMounted(() => {
@@ -37,20 +37,26 @@ onMounted(() => {
 
 async function addMember() {
     try {
-        await teamStore.addMember(props.id, Number(newMemberId.value));
+        await teamStore.addMember(props.id, {
+            name: newMember.name,
+            phone: newMember.phone,
+            email: newMember.email,
+        });
         toast.success('Membro adicionado!');
         showAddMember.value = false;
-        newMemberId.value = '';
+        newMember.name = '';
+        newMember.phone = '';
+        newMember.email = '';
         teamStore.fetchDashboard(props.id);
     } catch {
         // error handled by store
     }
 }
 
-async function removeMember(userId) {
+async function removeMember(memberId) {
     if (!confirm('Remover este membro?')) return;
     try {
-        await teamStore.removeMember(props.id, userId);
+        await teamStore.removeMember(props.id, memberId);
         toast.success('Membro removido.');
         teamStore.fetchDashboard(props.id);
     } catch {
@@ -116,8 +122,8 @@ function formatCurrency(value) {
                                 class="flex items-center justify-between"
                             >
                                 <div>
-                                    <p class="text-sm font-medium text-gray-900">{{ member.user.name }}</p>
-                                    <p class="text-xs text-gray-500">{{ member.user.email }}</p>
+                                    <p class="text-sm font-medium text-gray-900">{{ member.name }}</p>
+                                    <p class="text-xs text-gray-500">{{ member.phone }}</p>
                                 </div>
                                 <div class="flex items-center gap-2">
                                     <span :class="[
@@ -126,8 +132,9 @@ function formatCurrency(value) {
                                     ]">
                                         {{ member.role }}
                                     </span>
+                                    <span v-if="member.has_account" class="text-xs text-green-600" title="Tem conta no sistema">&#10003;</span>
                                     <button
-                                        v-if="isAdmin && member.id !== teamStore.currentTeam.owner?.id"
+                                        v-if="isAdmin && member.user_id !== teamStore.currentTeam.owner?.id"
                                         @click="removeMember(member.id)"
                                         class="text-xs text-red-500 hover:text-red-700"
                                     >
@@ -175,7 +182,9 @@ function formatCurrency(value) {
             <!-- Add Member Modal -->
             <Modal :show="showAddMember" title="Adicionar Membro" @close="showAddMember = false">
                 <form @submit.prevent="addMember" class="space-y-4">
-                    <Input v-model="newMemberId" label="ID do usuario" placeholder="Digite o ID do usuario" required />
+                    <Input v-model="newMember.name" label="Nome" placeholder="Nome completo" required />
+                    <Input v-model="newMember.phone" label="Telefone" placeholder="11999999999" required />
+                    <Input v-model="newMember.email" type="email" label="Email (opcional)" placeholder="email@exemplo.com" />
                     <p v-if="teamStore.error" class="text-sm text-red-600">{{ teamStore.error }}</p>
                 </form>
                 <template #footer>

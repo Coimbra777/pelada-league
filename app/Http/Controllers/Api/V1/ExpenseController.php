@@ -19,7 +19,7 @@ class ExpenseController extends Controller
         $user = Auth::user();
 
         $membership = $team->members()->where('user_id', $user->id)->first();
-        if (!$membership || $membership->pivot->role !== 'admin') {
+        if (!$membership || $membership->role !== 'admin') {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -63,7 +63,7 @@ class ExpenseController extends Controller
             return response()->json(['message' => 'Not found.'], 404);
         }
 
-        $expense->load('charges.user');
+        $expense->load('charges.teamMember');
 
         return response()->json([
             'expense' => new ExpenseResource($expense),

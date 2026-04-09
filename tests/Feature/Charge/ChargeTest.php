@@ -116,7 +116,10 @@ class ChargeTest extends TestCase
     {
         config()->set('services.asaas.webhook_token', 'test-token');
 
+        $user = User::factory()->create();
         $charge = Charge::factory()->create([
+            'user_id' => $user->id,
+            'team_member_id' => null,
             'asaas_charge_id' => 'pay_webhook_test',
             'status' => 'PENDING',
         ]);
@@ -142,7 +145,10 @@ class ChargeTest extends TestCase
     {
         config()->set('services.asaas.webhook_token', 'test-token');
 
+        $user = User::factory()->create();
         $charge = Charge::factory()->create([
+            'user_id' => $user->id,
+            'team_member_id' => null,
             'asaas_charge_id' => 'pay_idempotent',
             'status' => 'RECEIVED',
             'paid_at' => now()->subHour(),
@@ -179,7 +185,10 @@ class ChargeTest extends TestCase
     {
         config()->set('services.asaas.webhook_token', 'test-token');
 
+        $user = User::factory()->create();
         $charge = Charge::factory()->create([
+            'user_id' => $user->id,
+            'team_member_id' => null,
             'asaas_charge_id' => 'pay_cash',
             'status' => 'PENDING',
         ]);
@@ -205,7 +214,10 @@ class ChargeTest extends TestCase
     {
         config()->set('services.asaas.webhook_token', 'test-token');
 
+        $user = User::factory()->create();
         $charge = Charge::factory()->create([
+            'user_id' => $user->id,
+            'team_member_id' => null,
             'asaas_charge_id' => 'pay_overdue',
             'status' => 'PENDING',
         ]);
@@ -230,7 +242,10 @@ class ChargeTest extends TestCase
     {
         config()->set('services.asaas.webhook_token', 'test-token');
 
+        $user = User::factory()->create();
         $charge = Charge::factory()->create([
+            'user_id' => $user->id,
+            'team_member_id' => null,
             'asaas_charge_id' => 'pay_already_paid',
             'status' => 'CONFIRMED',
             'paid_at' => now()->subDay(),

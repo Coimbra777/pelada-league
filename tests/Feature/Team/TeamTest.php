@@ -3,6 +3,7 @@
 namespace Tests\Feature\Team;
 
 use App\Models\Team;
+use App\Models\TeamMember;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -13,7 +14,7 @@ class TeamTest extends TestCase
 
     public function test_user_can_create_team(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['phone' => '11999999999']);
 
         $response = $this->actingAs($user, 'sanctum')
             ->postJson('/api/v1/teams', ['name' => 'My Team']);
@@ -29,6 +30,7 @@ class TeamTest extends TestCase
         $this->assertDatabaseHas('team_members', [
             'team_id' => $response->json('team.id'),
             'user_id' => $user->id,
+            'name' => $user->name,
             'role' => 'admin',
         ]);
     }
@@ -39,10 +41,24 @@ class TeamTest extends TestCase
         $otherUser = User::factory()->create();
 
         $myTeam = Team::factory()->create(['owner_id' => $user->id]);
-        $myTeam->members()->attach($user->id, ['role' => 'admin']);
+        TeamMember::create([
+            'team_id' => $myTeam->id,
+            'user_id' => $user->id,
+            'name' => $user->name,
+            'phone' => $user->phone ?? '11000000001',
+            'email' => $user->email,
+            'role' => 'admin',
+        ]);
 
         $otherTeam = Team::factory()->create(['owner_id' => $otherUser->id]);
-        $otherTeam->members()->attach($otherUser->id, ['role' => 'admin']);
+        TeamMember::create([
+            'team_id' => $otherTeam->id,
+            'user_id' => $otherUser->id,
+            'name' => $otherUser->name,
+            'phone' => $otherUser->phone ?? '11000000002',
+            'email' => $otherUser->email,
+            'role' => 'admin',
+        ]);
 
         $response = $this->actingAs($user, 'sanctum')
             ->getJson('/api/v1/teams');
@@ -52,42 +68,94 @@ class TeamTest extends TestCase
         $this->assertEquals($myTeam->id, $response->json('teams.0.id'));
     }
 
-    public function test_admin_can_add_member_to_team(): void
+    public function test_admin_can_add_member_by_name_phone_email(): void
     {
         $admin = User::factory()->create();
-        $newMember = User::factory()->create();
 
         $team = Team::factory()->create(['owner_id' => $admin->id]);
-        $team->members()->attach($admin->id, ['role' => 'admin']);
+        TeamMember::create([
+            'team_id' => $team->id,
+            'user_id' => $admin->id,
+            'name' => $admin->name,
+            'phone' => '11000000001',
+            'email' => $admin->email,
+            'role' => 'admin',
+        ]);
 
         $response = $this->actingAs($admin, 'sanctum')
             ->postJson("/api/v1/teams/{$team->id}/members", [
-                'user_id' => $newMember->id,
+                'name' => 'Joao Silva',
+                'phone' => '11988887777',
+                'email' => 'joao@example.com',
             ]);
 
         $response->assertStatus(201)
-            ->assertJson(['message' => 'Member added.']);
+            ->assertJsonPath('member.name', 'Joao Silva')
+            ->assertJsonPath('member.phone', '11988887777');
 
         $this->assertDatabaseHas('team_members', [
             'team_id' => $team->id,
-            'user_id' => $newMember->id,
+            'name' => 'Joao Silva',
+            'phone' => '11988887777',
+            'email' => 'joao@example.com',
             'role' => 'member',
         ]);
+    }
+
+    public function test_add_member_auto_links_user_by_email(): void
+    {
+        $admin = User::factory()->create();
+        $existingUser = User::factory()->create(['email' => 'maria@example.com']);
+
+        $team = Team::factory()->create(['owner_id' => $admin->id]);
+        TeamMember::create([
+            'team_id' => $team->id,
+            'user_id' => $admin->id,
+            'name' => $admin->name,
+            'phone' => '11000000001',
+            'email' => $admin->email,
+            'role' => 'admin',
+        ]);
+
+        $response = $this->actingAs($admin, 'sanctum')
+            ->postJson("/api/v1/teams/{$team->id}/members", [
+                'name' => 'Maria Souza',
+                'phone' => '11977776666',
+                'email' => 'maria@example.com',
+            ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('member.has_account', true)
+            ->assertJsonPath('member.user_id', $existingUser->id);
     }
 
     public function test_non_admin_cannot_add_member(): void
     {
         $admin = User::factory()->create();
-        $regularMember = User::factory()->create();
-        $newUser = User::factory()->create();
+        $regularUser = User::factory()->create();
 
         $team = Team::factory()->create(['owner_id' => $admin->id]);
-        $team->members()->attach($admin->id, ['role' => 'admin']);
-        $team->members()->attach($regularMember->id, ['role' => 'member']);
+        TeamMember::create([
+            'team_id' => $team->id,
+            'user_id' => $admin->id,
+            'name' => $admin->name,
+            'phone' => '11000000001',
+            'email' => $admin->email,
+            'role' => 'admin',
+        ]);
+        TeamMember::create([
+            'team_id' => $team->id,
+            'user_id' => $regularUser->id,
+            'name' => $regularUser->name,
+            'phone' => '11000000002',
+            'email' => $regularUser->email,
+            'role' => 'member',
+        ]);
 
-        $response = $this->actingAs($regularMember, 'sanctum')
+        $response = $this->actingAs($regularUser, 'sanctum')
             ->postJson("/api/v1/teams/{$team->id}/members", [
-                'user_id' => $newUser->id,
+                'name' => 'New Person',
+                'phone' => '11966665555',
             ]);
 
         $response->assertStatus(403);
@@ -96,11 +164,22 @@ class TeamTest extends TestCase
     public function test_admin_can_remove_member(): void
     {
         $admin = User::factory()->create();
-        $member = User::factory()->create();
 
         $team = Team::factory()->create(['owner_id' => $admin->id]);
-        $team->members()->attach($admin->id, ['role' => 'admin']);
-        $team->members()->attach($member->id, ['role' => 'member']);
+        TeamMember::create([
+            'team_id' => $team->id,
+            'user_id' => $admin->id,
+            'name' => $admin->name,
+            'phone' => '11000000001',
+            'email' => $admin->email,
+            'role' => 'admin',
+        ]);
+        $member = TeamMember::create([
+            'team_id' => $team->id,
+            'name' => 'Remove Me',
+            'phone' => '11000000002',
+            'role' => 'member',
+        ]);
 
         $response = $this->actingAs($admin, 'sanctum')
             ->deleteJson("/api/v1/teams/{$team->id}/members/{$member->id}");
@@ -109,8 +188,7 @@ class TeamTest extends TestCase
             ->assertJson(['message' => 'Member removed.']);
 
         $this->assertDatabaseMissing('team_members', [
-            'team_id' => $team->id,
-            'user_id' => $member->id,
+            'id' => $member->id,
         ]);
     }
 
@@ -119,10 +197,17 @@ class TeamTest extends TestCase
         $admin = User::factory()->create();
 
         $team = Team::factory()->create(['owner_id' => $admin->id]);
-        $team->members()->attach($admin->id, ['role' => 'admin']);
+        $adminMember = TeamMember::create([
+            'team_id' => $team->id,
+            'user_id' => $admin->id,
+            'name' => $admin->name,
+            'phone' => '11000000001',
+            'email' => $admin->email,
+            'role' => 'admin',
+        ]);
 
         $response = $this->actingAs($admin, 'sanctum')
-            ->deleteJson("/api/v1/teams/{$team->id}/members/{$admin->id}");
+            ->deleteJson("/api/v1/teams/{$team->id}/members/{$adminMember->id}");
 
         $response->assertStatus(422)
             ->assertJson(['message' => 'Cannot remove the team owner.']);
@@ -134,7 +219,14 @@ class TeamTest extends TestCase
         $outsider = User::factory()->create();
 
         $team = Team::factory()->create(['owner_id' => $owner->id]);
-        $team->members()->attach($owner->id, ['role' => 'admin']);
+        TeamMember::create([
+            'team_id' => $team->id,
+            'user_id' => $owner->id,
+            'name' => $owner->name,
+            'phone' => '11000000001',
+            'email' => $owner->email,
+            'role' => 'admin',
+        ]);
 
         $response = $this->actingAs($outsider, 'sanctum')
             ->getJson("/api/v1/teams/{$team->id}");

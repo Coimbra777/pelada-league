@@ -3,6 +3,7 @@
 namespace Tests\Feature\Expense;
 
 use App\Models\Team;
+use App\Models\TeamMember;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -14,9 +15,14 @@ class ExpenseTest extends TestCase
 
     private function fakeAsaasForMembers(int $count): void
     {
-        $sequence = Http::sequence();
+        $customerSequence = Http::sequence();
         for ($i = 1; $i <= $count; $i++) {
-            $sequence->push([
+            $customerSequence->push(['id' => "cus_auto_{$i}"], 200);
+        }
+
+        $paymentSequence = Http::sequence();
+        for ($i = 1; $i <= $count; $i++) {
+            $paymentSequence->push([
                 'id' => "pay_split_{$i}",
                 'status' => 'PENDING',
                 'invoiceUrl' => "https://sandbox.asaas.com/i/split_{$i}",
@@ -28,25 +34,35 @@ class ExpenseTest extends TestCase
                 'encodedImage' => base64_encode('fake-qr'),
                 'payload' => '00020126580014br.gov.bcb.pix',
             ], 200),
-            '*/payments' => $sequence,
+            '*/customers' => $customerSequence,
+            '*/payments' => $paymentSequence,
         ]);
     }
 
     private function createTeamWithMembers(int $memberCount): array
     {
-        $admin = User::factory()->create(['asaas_customer_id' => 'cus_admin']);
+        $admin = User::factory()->create();
 
         $team = Team::factory()->create(['owner_id' => $admin->id]);
-        $team->members()->attach($admin->id, ['role' => 'admin']);
+        TeamMember::create([
+            'team_id' => $team->id,
+            'user_id' => $admin->id,
+            'name' => $admin->name,
+            'phone' => '11000000001',
+            'email' => $admin->email,
+            'role' => 'admin',
+        ]);
 
-        $members = [$admin];
         for ($i = 1; $i < $memberCount; $i++) {
-            $member = User::factory()->create(['asaas_customer_id' => "cus_member_{$i}"]);
-            $team->members()->attach($member->id, ['role' => 'member']);
-            $members[] = $member;
+            TeamMember::create([
+                'team_id' => $team->id,
+                'name' => "Member {$i}",
+                'phone' => "1100000000" . ($i + 1),
+                'role' => 'member',
+            ]);
         }
 
-        return [$team, $admin, $members];
+        return [$team, $admin];
     }
 
     public function test_expense_splits_correctly_among_members(): void
@@ -111,44 +127,50 @@ class ExpenseTest extends TestCase
         $this->assertEquals('3.34', $charges[2]->amount);
     }
 
-    public function test_members_without_asaas_customer_id_blocks_expense(): void
+    public function test_auto_creates_asaas_customer_for_members(): void
     {
-        Http::fake();
+        $this->fakeAsaasForMembers(2);
+        [$team, $admin] = $this->createTeamWithMembers(2);
 
-        $admin = User::factory()->create(['asaas_customer_id' => 'cus_admin']);
-        $memberWithId = User::factory()->create(['asaas_customer_id' => 'cus_has']);
-        $memberWithout = User::factory()->create(['asaas_customer_id' => null, 'name' => 'No Asaas']);
-
-        $team = Team::factory()->create(['owner_id' => $admin->id]);
-        $team->members()->attach($admin->id, ['role' => 'admin']);
-        $team->members()->attach($memberWithId->id, ['role' => 'member']);
-        $team->members()->attach($memberWithout->id, ['role' => 'member']);
-
-        $response = $this->actingAs($admin, 'sanctum')
+        $this->actingAs($admin, 'sanctum')
             ->postJson("/api/v1/teams/{$team->id}/expenses", [
-                'description' => 'Block test',
+                'description' => 'Auto customer test',
                 'total_amount' => 100.00,
                 'due_date' => now()->addDays(3)->format('Y-m-d'),
             ]);
 
-        $response->assertStatus(422);
-        $this->assertStringContainsString('No Asaas', $response->json('message'));
-        $this->assertDatabaseCount('charges', 0);
-        Http::assertNothingSent();
+        $members = TeamMember::where('team_id', $team->id)->get();
+        foreach ($members as $member) {
+            $this->assertNotNull($member->asaas_customer_id);
+        }
     }
 
     public function test_non_admin_cannot_create_expense(): void
     {
         Http::fake();
 
-        $admin = User::factory()->create(['asaas_customer_id' => 'cus_admin']);
-        $member = User::factory()->create(['asaas_customer_id' => 'cus_member']);
+        $admin = User::factory()->create();
+        $regularUser = User::factory()->create();
 
         $team = Team::factory()->create(['owner_id' => $admin->id]);
-        $team->members()->attach($admin->id, ['role' => 'admin']);
-        $team->members()->attach($member->id, ['role' => 'member']);
+        TeamMember::create([
+            'team_id' => $team->id,
+            'user_id' => $admin->id,
+            'name' => $admin->name,
+            'phone' => '11000000001',
+            'email' => $admin->email,
+            'role' => 'admin',
+        ]);
+        TeamMember::create([
+            'team_id' => $team->id,
+            'user_id' => $regularUser->id,
+            'name' => $regularUser->name,
+            'phone' => '11000000002',
+            'email' => $regularUser->email,
+            'role' => 'member',
+        ]);
 
-        $response = $this->actingAs($member, 'sanctum')
+        $response = $this->actingAs($regularUser, 'sanctum')
             ->postJson("/api/v1/teams/{$team->id}/expenses", [
                 'description' => 'Unauthorized',
                 'total_amount' => 50.00,
@@ -159,7 +181,7 @@ class ExpenseTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_show_expense_includes_charges_with_user(): void
+    public function test_show_expense_includes_charges_with_member(): void
     {
         $this->fakeAsaasForMembers(2);
         [$team, $admin] = $this->createTeamWithMembers(2);
@@ -181,29 +203,37 @@ class ExpenseTest extends TestCase
                 'expense' => [
                     'id', 'description', 'total_amount', 'status',
                     'charges' => [
-                        '*' => ['id', 'amount', 'status', 'user'],
+                        '*' => ['id', 'amount', 'status', 'member'],
                     ],
                 ],
             ]);
     }
 
-    public function test_expense_fails_when_no_eligible_members(): void
+    public function test_single_member_expense_works(): void
     {
-        Http::fake();
+        $this->fakeAsaasForMembers(1);
 
-        $admin = User::factory()->create(['asaas_customer_id' => null]);
-
+        $admin = User::factory()->create();
         $team = Team::factory()->create(['owner_id' => $admin->id]);
-        $team->members()->attach($admin->id, ['role' => 'admin']);
+
+        TeamMember::create([
+            'team_id' => $team->id,
+            'user_id' => $admin->id,
+            'name' => $admin->name,
+            'phone' => '11000000001',
+            'email' => $admin->email,
+            'role' => 'admin',
+        ]);
 
         $response = $this->actingAs($admin, 'sanctum')
             ->postJson("/api/v1/teams/{$team->id}/expenses", [
-                'description' => 'No eligible',
+                'description' => 'One member',
                 'total_amount' => 50.00,
                 'due_date' => now()->addDays(3)->format('Y-m-d'),
             ]);
 
-        $response->assertStatus(422);
+        $response->assertStatus(201);
+        $this->assertDatabaseCount('charges', 1);
     }
 
     public function test_webhook_updates_expense_status_to_paid(): void
@@ -223,7 +253,6 @@ class ExpenseTest extends TestCase
         $expense = \App\Models\Expense::first();
         $charges = \App\Models\Charge::where('expense_id', $expense->id)->get();
 
-        // Pay all charges via webhook
         foreach ($charges as $charge) {
             $this->postJson('/api/v1/webhooks/asaas', [
                 'event' => 'PAYMENT_RECEIVED',
@@ -252,7 +281,6 @@ class ExpenseTest extends TestCase
         $expense = \App\Models\Expense::first();
         $firstCharge = \App\Models\Charge::where('expense_id', $expense->id)->first();
 
-        // Pay only the first charge
         $this->postJson('/api/v1/webhooks/asaas', [
             'event' => 'PAYMENT_RECEIVED',
             'payment' => ['id' => $firstCharge->asaas_charge_id],
@@ -276,7 +304,6 @@ class ExpenseTest extends TestCase
                 'due_date' => now()->addDays(3)->format('Y-m-d'),
             ]);
 
-        // Pay one charge
         $firstCharge = \App\Models\Charge::first();
         $this->postJson('/api/v1/webhooks/asaas', [
             'event' => 'PAYMENT_RECEIVED',

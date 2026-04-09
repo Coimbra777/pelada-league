@@ -20,10 +20,30 @@ class WebhookController extends Controller
 
     public function asaas(Request $request): JsonResponse
     {
-        $token = $request->header('asaas-access-token');
+        // IP whitelist (optional)
+        $allowedIps = config('services.asaas.webhook_allowed_ips', '');
+        if (!empty($allowedIps)) {
+            $ipList = array_map('trim', explode(',', $allowedIps));
+            if (!in_array($request->ip(), $ipList)) {
+                return response()->json(['message' => 'Forbidden.'], 403);
+            }
+        }
 
+        // Token validation
+        $token = $request->header('asaas-access-token');
         if ($token !== config('services.asaas.webhook_token')) {
             return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
+        // HMAC signature validation (optional)
+        $signatureSecret = config('services.asaas.webhook_signature_secret', '');
+        if (!empty($signatureSecret)) {
+            $payload = $request->getContent();
+            $expectedSignature = hash_hmac('sha256', $payload, $signatureSecret);
+            $providedSignature = $request->header('asaas-signature', '');
+            if (!hash_equals($expectedSignature, $providedSignature)) {
+                return response()->json(['message' => 'Invalid signature.'], 401);
+            }
         }
 
         $event = $request->input('event');

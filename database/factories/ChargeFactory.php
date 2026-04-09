@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\Charge;
+use App\Models\TeamMember;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -16,7 +17,8 @@ class ChargeFactory extends Factory
     public function definition(): array
     {
         return [
-            'user_id' => User::factory(),
+            'user_id' => null,
+            'team_member_id' => TeamMember::factory(),
             'description' => fake()->sentence(),
             'amount' => fake()->randomFloat(2, 5, 1000),
             'due_date' => fake()->dateTimeBetween('now', '+30 days')->format('Y-m-d'),

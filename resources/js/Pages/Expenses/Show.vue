@@ -68,8 +68,8 @@ function formatCurrency(value) {
                         class="py-3 flex items-center justify-between"
                     >
                         <div class="flex-1">
-                            <p class="text-sm font-medium text-gray-900">{{ charge.user?.name || 'Usuario' }}</p>
-                            <p class="text-xs text-gray-500">{{ charge.user?.email }}</p>
+                            <p class="text-sm font-medium text-gray-900">{{ charge.member?.name || charge.user?.name || 'Membro' }}</p>
+                            <p class="text-xs text-gray-500">{{ charge.member?.phone || charge.user?.email }}</p>
                         </div>
                         <div class="flex items-center gap-3">
                             <p class="text-sm font-semibold text-gray-900">{{ formatCurrency(charge.amount) }}</p>

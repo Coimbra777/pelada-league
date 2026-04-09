@@ -9,23 +9,18 @@ use Illuminate\Support\Facades\Log;
 
 class ExpenseService
 {
-    public function __construct(private ChargeService $chargeService) {}
+    public function __construct(
+        private ChargeService $chargeService,
+        private NotificationService $notificationService,
+    ) {}
 
     public function createExpenseAndSplit(Team $team, User $creator, array $data): Expense
     {
-        $allMembers = $team->members()->get();
+        $members = $team->members()->get();
 
-        if ($allMembers->isEmpty()) {
+        if ($members->isEmpty()) {
             throw new \DomainException('Team has no members.');
         }
-
-        $membersWithoutAsaas = $allMembers->filter(fn ($m) => !$m->asaas_customer_id);
-
-        if ($membersWithoutAsaas->isNotEmpty()) {
-            throw new \DomainException('All members must have payment enabled. Members without: ' . $membersWithoutAsaas->pluck('name')->implode(', '));
-        }
-
-        $members = $allMembers;
 
         $memberCount = $members->count();
         $totalAmount = (float) $data['total_amount'];
@@ -47,22 +42,24 @@ class ExpenseService
                 : $baseAmount;
 
             try {
-                $charge = $this->chargeService->createCharge($member, [
+                $charge = $this->chargeService->createChargeForMember($member, [
                     'description' => $data['description'],
                     'amount' => $amount,
                     'due_date' => $data['due_date'],
                 ]);
 
                 $charge->update(['expense_id' => $expense->id]);
+
+                $this->notificationService->sendChargeNotification($member, $charge);
             } catch (\Throwable $e) {
                 Log::error('Failed to create charge for team member', [
-                    'user_id' => $member->id,
+                    'team_member_id' => $member->id,
                     'expense_id' => $expense->id,
                     'error' => $e->getMessage(),
                 ]);
             }
         }
 
-        return $expense->load('charges.user');
+        return $expense->load('charges.teamMember');
     }
 }

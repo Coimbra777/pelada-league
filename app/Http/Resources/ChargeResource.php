@@ -21,6 +21,7 @@ class ChargeResource extends JsonResource
             'paid_at' => $this->paid_at,
             'created_at' => $this->created_at,
             'user' => new UserResource($this->whenLoaded('user')),
+            'member' => new TeamMemberResource($this->whenLoaded('teamMember')),
         ];
     }
 }

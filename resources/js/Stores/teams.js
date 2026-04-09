@@ -54,10 +54,10 @@ export const useTeamStore = defineStore('teams', {
             }
         },
 
-        async addMember(teamId, userId) {
+        async addMember(teamId, { name, phone, email }) {
             this.error = null;
             try {
-                await api.post(`/teams/${teamId}/members`, { user_id: userId });
+                await api.post(`/teams/${teamId}/members`, { name, phone, email: email || undefined });
                 await this.fetchTeam(teamId);
             } catch (err) {
                 this.error = err.data?.message || 'Falha ao adicionar membro.';
@@ -65,11 +65,11 @@ export const useTeamStore = defineStore('teams', {
             }
         },
 
-        async removeMember(teamId, userId) {
+        async removeMember(teamId, memberId) {
             this.error = null;
             try {
-                await api.delete(`/teams/${teamId}/members/${userId}`);
-                this.members = this.members.filter(m => m.id !== userId);
+                await api.delete(`/teams/${teamId}/members/${memberId}`);
+                this.members = this.members.filter(m => m.id !== memberId);
             } catch (err) {
                 this.error = err.data?.message || 'Falha ao remover membro.';
                 throw err;
