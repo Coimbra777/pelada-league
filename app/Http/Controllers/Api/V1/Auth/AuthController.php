@@ -7,19 +7,32 @@ use App\Http\Requests\Api\V1\Auth\LoginRequest;
 use App\Http\Requests\Api\V1\Auth\RegisterRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
+use App\Services\Asaas\AsaasCustomerService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
-    public function register(RegisterRequest $request): JsonResponse
+    public function register(RegisterRequest $request, AsaasCustomerService $asaasCustomerService): JsonResponse
     {
         $user = User::create($request->validated());
+
+        try {
+            $customerId = $asaasCustomerService->create($user);
+            $user->asaas_customer_id = $customerId;
+            $user->save();
+        } catch (\Throwable $e) {
+            Log::error('Asaas customer creation failed', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
-            'user' => new UserResource($user),
+            'user' => new UserResource($user->refresh()),
             'token' => $token,
         ], 201);
     }
