@@ -12,6 +12,7 @@ class Charge extends Model
 
     protected $fillable = [
         'user_id',
+        'expense_id',
         'description',
         'amount',
         'due_date',
@@ -35,5 +36,10 @@ class Charge extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function expense(): BelongsTo
+    {
+        return $this->belongsTo(Expense::class);
     }
 }
