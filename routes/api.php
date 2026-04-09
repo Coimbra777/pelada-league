@@ -19,6 +19,7 @@ Route::prefix('v1')->group(function () {
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('/charges', [ChargeController::class, 'store']);
+        Route::post('/charges/{charge}/sync', [ChargeController::class, 'sync']);
     });
 
     Route::prefix('webhooks')->group(function () {

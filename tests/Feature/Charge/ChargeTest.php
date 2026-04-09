@@ -174,4 +174,128 @@ class ChargeTest extends TestCase
         $response->assertStatus(401)
             ->assertJson(['message' => 'Unauthorized.']);
     }
+
+    public function test_webhook_handles_received_in_cash(): void
+    {
+        config()->set('services.asaas.webhook_token', 'test-token');
+
+        $charge = Charge::factory()->create([
+            'asaas_charge_id' => 'pay_cash',
+            'status' => 'PENDING',
+        ]);
+
+        $response = $this->postJson('/api/v1/webhooks/asaas', [
+            'event' => 'PAYMENT_RECEIVED_IN_CASH',
+            'payment' => ['id' => 'pay_cash'],
+        ], ['asaas-access-token' => 'test-token']);
+
+        $response->assertOk()
+            ->assertJson(['message' => 'Webhook processed.']);
+
+        $this->assertDatabaseHas('charges', [
+            'id' => $charge->id,
+            'status' => 'RECEIVED_IN_CASH',
+        ]);
+
+        $charge->refresh();
+        $this->assertNotNull($charge->paid_at);
+    }
+
+    public function test_webhook_handles_overdue(): void
+    {
+        config()->set('services.asaas.webhook_token', 'test-token');
+
+        $charge = Charge::factory()->create([
+            'asaas_charge_id' => 'pay_overdue',
+            'status' => 'PENDING',
+        ]);
+
+        $response = $this->postJson('/api/v1/webhooks/asaas', [
+            'event' => 'PAYMENT_OVERDUE',
+            'payment' => ['id' => 'pay_overdue'],
+        ], ['asaas-access-token' => 'test-token']);
+
+        $response->assertOk();
+
+        $this->assertDatabaseHas('charges', [
+            'id' => $charge->id,
+            'status' => 'OVERDUE',
+        ]);
+
+        $charge->refresh();
+        $this->assertNull($charge->paid_at);
+    }
+
+    public function test_webhook_does_not_override_paid_status(): void
+    {
+        config()->set('services.asaas.webhook_token', 'test-token');
+
+        $charge = Charge::factory()->create([
+            'asaas_charge_id' => 'pay_already_paid',
+            'status' => 'CONFIRMED',
+            'paid_at' => now()->subDay(),
+        ]);
+
+        $response = $this->postJson('/api/v1/webhooks/asaas', [
+            'event' => 'PAYMENT_OVERDUE',
+            'payment' => ['id' => 'pay_already_paid'],
+        ], ['asaas-access-token' => 'test-token']);
+
+        $response->assertOk()
+            ->assertJson(['message' => 'Already processed.']);
+
+        $this->assertDatabaseHas('charges', [
+            'id' => $charge->id,
+            'status' => 'CONFIRMED',
+        ]);
+    }
+
+    public function test_sync_updates_charge_from_asaas(): void
+    {
+        Http::fake([
+            '*/payments/pay_sync_test' => Http::response([
+                'id' => 'pay_sync_test',
+                'status' => 'RECEIVED',
+            ], 200),
+        ]);
+
+        $user = User::factory()->create(['asaas_customer_id' => 'cus_123']);
+        $charge = Charge::factory()->create([
+            'user_id' => $user->id,
+            'asaas_charge_id' => 'pay_sync_test',
+            'status' => 'PENDING',
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/v1/charges/{$charge->id}/sync");
+
+        $response->assertOk()
+            ->assertJsonPath('charge.status', 'RECEIVED');
+
+        $this->assertDatabaseHas('charges', [
+            'id' => $charge->id,
+            'status' => 'RECEIVED',
+        ]);
+    }
+
+    public function test_sync_rejects_other_users_charge(): void
+    {
+        Http::fake();
+
+        $owner = User::factory()->create(['asaas_customer_id' => 'cus_owner']);
+        $otherUser = User::factory()->create(['asaas_customer_id' => 'cus_other']);
+
+        $charge = Charge::factory()->create([
+            'user_id' => $owner->id,
+            'asaas_charge_id' => 'pay_forbidden',
+        ]);
+
+        $response = $this->actingAs($otherUser, 'sanctum')
+            ->postJson("/api/v1/charges/{$charge->id}/sync");
+
+        $response->assertStatus(403)
+            ->assertJson(['message' => 'Forbidden.']);
+
+        Http::assertNothingSent();
+    }
 }

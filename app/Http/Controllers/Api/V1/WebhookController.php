@@ -9,6 +9,15 @@ use Illuminate\Http\Request;
 
 class WebhookController extends Controller
 {
+    private const EVENT_STATUS_MAP = [
+        'PAYMENT_RECEIVED' => 'RECEIVED',
+        'PAYMENT_CONFIRMED' => 'CONFIRMED',
+        'PAYMENT_RECEIVED_IN_CASH' => 'RECEIVED_IN_CASH',
+        'PAYMENT_OVERDUE' => 'OVERDUE',
+    ];
+
+    private const PAID_STATUSES = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'];
+
     public function asaas(Request $request): JsonResponse
     {
         $token = $request->header('asaas-access-token');
@@ -20,7 +29,7 @@ class WebhookController extends Controller
         $event = $request->input('event');
         $paymentId = $request->input('payment.id');
 
-        if (!in_array($event, ['PAYMENT_RECEIVED', 'PAYMENT_CONFIRMED'])) {
+        if (!isset(self::EVENT_STATUS_MAP[$event])) {
             return response()->json(['message' => 'Event ignored.']);
         }
 
@@ -30,15 +39,17 @@ class WebhookController extends Controller
             return response()->json(['message' => 'Charge not found.'], 404);
         }
 
-        $targetStatus = $event === 'PAYMENT_RECEIVED' ? 'RECEIVED' : 'CONFIRMED';
+        $targetStatus = self::EVENT_STATUS_MAP[$event];
 
-        if ($charge->status === $targetStatus) {
+        if (in_array($charge->status, self::PAID_STATUSES) || $charge->status === $targetStatus) {
             return response()->json(['message' => 'Already processed.']);
         }
 
+        $isPaid = in_array($targetStatus, self::PAID_STATUSES);
+
         $charge->update([
             'status' => $targetStatus,
-            'paid_at' => $charge->paid_at ?? now(),
+            'paid_at' => $isPaid ? ($charge->paid_at ?? now()) : $charge->paid_at,
         ]);
 
         return response()->json(['message' => 'Webhook processed.']);

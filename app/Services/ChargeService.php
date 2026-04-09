@@ -37,4 +37,21 @@ class ChargeService
             'payment_link' => $payment['invoiceUrl'] ?? null,
         ]);
     }
+
+    private const PAID_STATUSES = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'];
+
+    public function syncCharge(Charge $charge): Charge
+    {
+        $payment = $this->asaasChargeService->getPayment($charge->asaas_charge_id);
+
+        $newStatus = $payment['status'] ?? $charge->status;
+        $isPaid = in_array($newStatus, self::PAID_STATUSES);
+
+        $charge->update([
+            'status' => $newStatus,
+            'paid_at' => $isPaid ? ($charge->paid_at ?? now()) : $charge->paid_at,
+        ]);
+
+        return $charge->refresh();
+    }
 }

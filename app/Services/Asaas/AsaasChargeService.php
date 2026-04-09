@@ -23,4 +23,9 @@ class AsaasChargeService
     {
         return $this->client->get("/payments/{$paymentId}/pixQrCode");
     }
+
+    public function getPayment(string $paymentId): array
+    {
+        return $this->client->get("/payments/{$paymentId}");
+    }
 }
