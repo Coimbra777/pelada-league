@@ -13,19 +13,19 @@ class ExpenseService
 
     public function createExpenseAndSplit(Team $team, User $creator, array $data): Expense
     {
-        $members = $team->members()->whereNotNull('asaas_customer_id')->get();
+        $allMembers = $team->members()->get();
 
-        $skipped = $team->members()->whereNull('asaas_customer_id')->get();
-        foreach ($skipped as $member) {
-            Log::warning('Skipping member without Asaas customer ID', [
-                'user_id' => $member->id,
-                'team_id' => $team->id,
-            ]);
+        if ($allMembers->isEmpty()) {
+            throw new \DomainException('Team has no members.');
         }
 
-        if ($members->isEmpty()) {
-            throw new \DomainException('No eligible members to split expense.');
+        $membersWithoutAsaas = $allMembers->filter(fn ($m) => !$m->asaas_customer_id);
+
+        if ($membersWithoutAsaas->isNotEmpty()) {
+            throw new \DomainException('All members must have payment enabled. Members without: ' . $membersWithoutAsaas->pluck('name')->implode(', '));
         }
+
+        $members = $allMembers;
 
         $memberCount = $members->count();
         $totalAmount = (float) $data['total_amount'];

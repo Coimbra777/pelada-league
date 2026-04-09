@@ -42,4 +42,33 @@ class Expense extends Model
     {
         return $this->hasMany(Charge::class);
     }
+
+    private const PAID_STATUSES = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'];
+
+    public function recalculateStatus(): void
+    {
+        $charges = $this->charges()->get();
+
+        if ($charges->isEmpty()) {
+            return;
+        }
+
+        $allPaid = $charges->every(fn ($c) => in_array($c->status, self::PAID_STATUSES));
+        $somePaid = $charges->contains(fn ($c) => in_array($c->status, self::PAID_STATUSES));
+        $anyOverdue = $charges->contains(fn ($c) => $c->status === 'OVERDUE');
+
+        if ($allPaid) {
+            $newStatus = 'PAID';
+        } elseif ($somePaid) {
+            $newStatus = 'PARTIALLY_PAID';
+        } elseif ($anyOverdue) {
+            $newStatus = 'OVERDUE';
+        } else {
+            $newStatus = 'open';
+        }
+
+        if ($this->status !== $newStatus) {
+            $this->update(['status' => $newStatus]);
+        }
+    }
 }

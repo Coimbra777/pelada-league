@@ -52,6 +52,10 @@ class WebhookController extends Controller
             'paid_at' => $isPaid ? ($charge->paid_at ?? now()) : $charge->paid_at,
         ]);
 
+        if ($charge->expense_id) {
+            $charge->expense->recalculateStatus();
+        }
+
         return response()->json(['message' => 'Webhook processed.']);
     }
 }

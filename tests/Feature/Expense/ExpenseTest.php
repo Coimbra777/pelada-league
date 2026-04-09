@@ -111,27 +111,30 @@ class ExpenseTest extends TestCase
         $this->assertEquals('3.34', $charges[2]->amount);
     }
 
-    public function test_members_without_asaas_customer_id_are_skipped(): void
+    public function test_members_without_asaas_customer_id_blocks_expense(): void
     {
-        $this->fakeAsaasForMembers(2);
+        Http::fake();
 
         $admin = User::factory()->create(['asaas_customer_id' => 'cus_admin']);
         $memberWithId = User::factory()->create(['asaas_customer_id' => 'cus_has']);
-        $memberWithout = User::factory()->create(['asaas_customer_id' => null]);
+        $memberWithout = User::factory()->create(['asaas_customer_id' => null, 'name' => 'No Asaas']);
 
         $team = Team::factory()->create(['owner_id' => $admin->id]);
         $team->members()->attach($admin->id, ['role' => 'admin']);
         $team->members()->attach($memberWithId->id, ['role' => 'member']);
         $team->members()->attach($memberWithout->id, ['role' => 'member']);
 
-        $this->actingAs($admin, 'sanctum')
+        $response = $this->actingAs($admin, 'sanctum')
             ->postJson("/api/v1/teams/{$team->id}/expenses", [
-                'description' => 'Skip test',
+                'description' => 'Block test',
                 'total_amount' => 100.00,
                 'due_date' => now()->addDays(3)->format('Y-m-d'),
             ]);
 
-        $this->assertDatabaseCount('charges', 2);
+        $response->assertStatus(422);
+        $this->assertStringContainsString('No Asaas', $response->json('message'));
+        $this->assertDatabaseCount('charges', 0);
+        Http::assertNothingSent();
     }
 
     public function test_non_admin_cannot_create_expense(): void
@@ -200,7 +203,97 @@ class ExpenseTest extends TestCase
                 'due_date' => now()->addDays(3)->format('Y-m-d'),
             ]);
 
-        $response->assertStatus(422)
-            ->assertJson(['message' => 'No eligible members to split expense.']);
+        $response->assertStatus(422);
+    }
+
+    public function test_webhook_updates_expense_status_to_paid(): void
+    {
+        config()->set('services.asaas.webhook_token', 'test-token');
+
+        $this->fakeAsaasForMembers(2);
+        [$team, $admin] = $this->createTeamWithMembers(2);
+
+        $this->actingAs($admin, 'sanctum')
+            ->postJson("/api/v1/teams/{$team->id}/expenses", [
+                'description' => 'Webhook expense test',
+                'total_amount' => 100.00,
+                'due_date' => now()->addDays(3)->format('Y-m-d'),
+            ]);
+
+        $expense = \App\Models\Expense::first();
+        $charges = \App\Models\Charge::where('expense_id', $expense->id)->get();
+
+        // Pay all charges via webhook
+        foreach ($charges as $charge) {
+            $this->postJson('/api/v1/webhooks/asaas', [
+                'event' => 'PAYMENT_RECEIVED',
+                'payment' => ['id' => $charge->asaas_charge_id],
+            ], ['asaas-access-token' => 'test-token']);
+        }
+
+        $expense->refresh();
+        $this->assertEquals('PAID', $expense->status);
+    }
+
+    public function test_webhook_sets_expense_partially_paid(): void
+    {
+        config()->set('services.asaas.webhook_token', 'test-token');
+
+        $this->fakeAsaasForMembers(2);
+        [$team, $admin] = $this->createTeamWithMembers(2);
+
+        $this->actingAs($admin, 'sanctum')
+            ->postJson("/api/v1/teams/{$team->id}/expenses", [
+                'description' => 'Partial test',
+                'total_amount' => 100.00,
+                'due_date' => now()->addDays(3)->format('Y-m-d'),
+            ]);
+
+        $expense = \App\Models\Expense::first();
+        $firstCharge = \App\Models\Charge::where('expense_id', $expense->id)->first();
+
+        // Pay only the first charge
+        $this->postJson('/api/v1/webhooks/asaas', [
+            'event' => 'PAYMENT_RECEIVED',
+            'payment' => ['id' => $firstCharge->asaas_charge_id],
+        ], ['asaas-access-token' => 'test-token']);
+
+        $expense->refresh();
+        $this->assertEquals('PARTIALLY_PAID', $expense->status);
+    }
+
+    public function test_dashboard_returns_financial_summary(): void
+    {
+        config()->set('services.asaas.webhook_token', 'test-token');
+
+        $this->fakeAsaasForMembers(2);
+        [$team, $admin] = $this->createTeamWithMembers(2);
+
+        $this->actingAs($admin, 'sanctum')
+            ->postJson("/api/v1/teams/{$team->id}/expenses", [
+                'description' => 'Dashboard test',
+                'total_amount' => 100.00,
+                'due_date' => now()->addDays(3)->format('Y-m-d'),
+            ]);
+
+        // Pay one charge
+        $firstCharge = \App\Models\Charge::first();
+        $this->postJson('/api/v1/webhooks/asaas', [
+            'event' => 'PAYMENT_RECEIVED',
+            'payment' => ['id' => $firstCharge->asaas_charge_id],
+        ], ['asaas-access-token' => 'test-token']);
+
+        $response = $this->actingAs($admin, 'sanctum')
+            ->getJson("/api/v1/teams/{$team->id}/dashboard");
+
+        $response->assertOk()
+            ->assertJsonStructure([
+                'total_expenses', 'total_open', 'total_paid',
+                'members_paid', 'members_pending',
+            ]);
+
+        $this->assertEquals(1, $response->json('total_expenses'));
+        $this->assertEquals(1, $response->json('members_paid'));
+        $this->assertEquals(1, $response->json('members_pending'));
     }
 }

@@ -13,6 +13,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->statefulApi();
+        $middleware->throttleApi('60,1');
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //

@@ -28,6 +28,7 @@ Route::prefix('v1')->group(function () {
             Route::post('/', [TeamController::class, 'store']);
             Route::get('/', [TeamController::class, 'index']);
             Route::get('/{team}', [TeamController::class, 'show']);
+            Route::get('/{team}/dashboard', [TeamController::class, 'dashboard']);
 
             Route::post('/{team}/members', [TeamMemberController::class, 'store']);
             Route::delete('/{team}/members/{user}', [TeamMemberController::class, 'destroy']);
