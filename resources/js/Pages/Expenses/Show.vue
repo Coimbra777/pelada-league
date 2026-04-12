@@ -75,6 +75,17 @@ const publicLink = computed(() => expense.value?.public_url ?? null);
 
 const isAdmin = computed(() => expense.value?.can_manage === true);
 
+const allChargesPending = computed(() => {
+    const charges = expense.value?.charges ?? [];
+    if (!charges.length) {
+        return true;
+    }
+    return charges.every((c) => c.status === 'pending');
+});
+
+/** Cobrancas fora de "pending" bloqueiam edicao estrutural (igual regras do backend). */
+const expenseEditLocked = computed(() => !allChargesPending.value);
+
 const existingParticipantPhones = computed(() => {
     const list = expense.value?.charges ?? [];
     return list
@@ -82,7 +93,32 @@ const existingParticipantPhones = computed(() => {
         .filter((p) => p.length >= 10);
 });
 
+/** Previsao (aprox.) do rateio se novos participantes forem salvos — mesmo arredondamento do backend no penultimo. */
+const previewSplitAfterSave = computed(() => {
+    const nNew = newParticipants.value.length;
+    const nCur = expense.value?.charges?.length ?? 0;
+    const total = Number(editForm.total_amount);
+    if (nNew === 0 || !Number.isFinite(total) || nCur + nNew < 1) {
+        return null;
+    }
+    const count = nCur + nNew;
+    const base = Math.floor((total / count) * 100) / 100;
+    const last = Math.round((total - base * (count - 1)) * 100) / 100;
+    return { count, base, last, total };
+});
+
+function formatBrl(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) {
+        return '—';
+    }
+    return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
 function openEditModal() {
+    if (expenseEditLocked.value) {
+        return;
+    }
     const e = expense.value;
     if (!e) return;
     editForm.description = e.description;
@@ -104,6 +140,7 @@ async function saveExpenseEdit() {
     }
     editErrors.value = {};
     editSaving.value = true;
+    const addedCount = newParticipants.value.length;
     try {
         await expenseStore.updateExpense(props.teamId, props.id, {
             description: editForm.description,
@@ -112,11 +149,20 @@ async function saveExpenseEdit() {
             pix_key: editForm.pix_key,
             pix_qr_code: editForm.pix_qr_code || null,
         });
-        if (newParticipants.value.length > 0) {
+        if (addedCount > 0) {
             await expenseStore.addExpenseParticipants(props.teamId, props.id, newParticipants.value);
         }
         await expenseStore.fetchExpense(props.teamId, props.id);
-        toast.success('Despesa atualizada!');
+        const e = expenseStore.currentExpense;
+        if (addedCount > 0) {
+            toast.success(
+                `${addedCount} participante(s) adicionado(s) com sucesso. Total ${formatBrl(e?.total_amount)} — ${formatBrl(e?.amount_per_member)} por pessoa.`,
+            );
+        } else {
+            toast.success(
+                `Despesa atualizada. Total ${formatBrl(e?.total_amount)} — ${formatBrl(e?.amount_per_member)} por pessoa.`,
+            );
+        }
         editModalOpen.value = false;
         nextTick(() => {
             participantsInputRef.value?.reset();
@@ -181,14 +227,33 @@ function closeProof() {
         <template v-else-if="expense && headerExpense">
             <Card class="mb-4">
                 <ExpenseHeader :expense="headerExpense" />
-                <button
-                    v-if="isAdmin"
-                    type="button"
-                    class="mt-4 w-full min-h-[48px] rounded-xl border border-gray-300 bg-white px-4 text-sm font-medium text-gray-800 shadow-sm active:bg-gray-50"
-                    @click="openEditModal"
-                >
-                    Editar despesa
-                </button>
+                <div v-if="isAdmin" class="mt-4 space-y-3">
+                    <div
+                        v-if="expenseEditLocked"
+                        class="rounded-xl border-2 border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm"
+                        role="status"
+                    >
+                        <p class="font-semibold">Edicao bloqueada</p>
+                        <p class="mt-1">
+                            Esta despesa possui cobrancas em andamento (comprovante enviado, validacao ou outro status
+                            diferente de pendente). Nao e possivel alterar o valor total nem incluir participantes.
+                        </p>
+                    </div>
+                    <button
+                        type="button"
+                        class="w-full min-h-[48px] rounded-xl border px-4 text-sm font-medium shadow-sm"
+                        :class="
+                            expenseEditLocked
+                                ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-500'
+                                : 'border-gray-300 bg-white text-gray-800 active:bg-gray-50'
+                        "
+                        :disabled="expenseEditLocked"
+                        :title="expenseEditLocked ? 'Edicao bloqueada — ha cobrancas em andamento' : ''"
+                        @click="openEditModal"
+                    >
+                        {{ expenseEditLocked ? 'Editar despesa (bloqueado)' : 'Editar despesa' }}
+                    </button>
+                </div>
             </Card>
 
             <div v-if="publicLink" class="space-y-3 mb-4">
@@ -269,6 +334,18 @@ function closeProof() {
                         v-model="newParticipants"
                         :existing-phones="existingParticipantPhones"
                     />
+                    <div
+                        v-if="previewSplitAfterSave"
+                        class="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-3 text-sm text-indigo-950"
+                    >
+                        <p class="font-semibold">Previsao ao salvar (rateio igual)</p>
+                        <p class="mt-1">
+                            Total {{ formatBrl(previewSplitAfterSave.total) }} dividido por
+                            {{ previewSplitAfterSave.count }} participantes: cerca de
+                            {{ formatBrl(previewSplitAfterSave.base) }} por pessoa (ultima parcela
+                            {{ formatBrl(previewSplitAfterSave.last) }} para fechar centavos).
+                        </p>
+                    </div>
                 </div>
             </form>
             <template #footer>
