@@ -15,6 +15,7 @@ use App\Http\Resources\PublicExpenseResource;
 use App\Models\Charge;
 use App\Models\Expense;
 use App\Models\TeamMember;
+use App\Services\ExpenseService;
 use App\Services\PaymentProofService;
 use App\Services\PublicExpenseCreatorService;
 use Illuminate\Http\JsonResponse;
@@ -59,6 +60,38 @@ class PublicExpenseController extends Controller
         ]);
     }
 
+    public function closeExpense(Request $request, string $hash): JsonResponse
+    {
+        $expense = Expense::where('public_hash', $hash)->firstOrFail();
+
+        $auth = $this->authorizeManageToken($request, $expense);
+        if ($auth instanceof JsonResponse) {
+            return $auth;
+        }
+
+        if ($expense->status === 'closed') {
+            return response()->json(['message' => 'Esta despesa ja foi finalizada.'], 422);
+        }
+
+        $charges = $expense->charges()->get();
+        if ($charges->isEmpty()) {
+            return response()->json(['message' => 'Nao ha participantes para finalizar.'], 422);
+        }
+
+        if ($charges->contains(fn (Charge $c) => $c->status !== 'validated')) {
+            return response()->json([
+                'message' => 'So e possivel finalizar quando todos os participantes estiverem com pagamento validado.',
+            ], 422);
+        }
+
+        $expense->update(['status' => 'closed']);
+        $expense->load(['charges.teamMember', 'charges.paymentProofs']);
+
+        return response()->json([
+            'expense' => new PublicExpenseResource($expense),
+        ]);
+    }
+
     public function updateExpense(UpdatePublicExpenseRequest $request, string $hash): JsonResponse
     {
         $expense = Expense::where('public_hash', $hash)->firstOrFail();
@@ -66,6 +99,10 @@ class PublicExpenseController extends Controller
         $auth = $this->authorizeManageToken($request, $expense);
         if ($auth instanceof JsonResponse) {
             return $auth;
+        }
+
+        if ($blocked = $this->rejectIfClosed($expense)) {
+            return $blocked;
         }
 
         $data = $request->validated();
@@ -94,13 +131,23 @@ class PublicExpenseController extends Controller
         ]);
     }
 
-    public function addParticipants(AddPublicExpenseParticipantsRequest $request, string $hash): JsonResponse
+    public function addParticipants(AddPublicExpenseParticipantsRequest $request, string $hash, ExpenseService $expenseService): JsonResponse
     {
         $expense = Expense::where('public_hash', $hash)->firstOrFail();
 
         $auth = $this->authorizeManageToken($request, $expense);
         if ($auth instanceof JsonResponse) {
             return $auth;
+        }
+
+        if ($blocked = $this->rejectIfClosed($expense)) {
+            return $blocked;
+        }
+
+        if ($expense->charges()->where('status', '!=', 'pending')->exists()) {
+            return response()->json([
+                'message' => 'Não é possível redistribuir valores pois já existem pagamentos em andamento.',
+            ], 422);
         }
 
         $participants = $request->input('participants', []);
@@ -121,32 +168,8 @@ class PublicExpenseController extends Controller
             }
         }
 
-        $sumAllocated = (float) $expense->charges()->sum('amount');
-        $total = (float) $expense->total_amount;
-        $remaining = round($total - $sumAllocated, 2);
-        $nNew = count($participants);
-
-        if ($nNew < 1) {
-            return response()->json(['message' => 'Nenhum participante valido.'], 422);
-        }
-
-        if ($remaining < 0.01) {
-            return response()->json([
-                'message' => 'Nao ha valor disponivel no total da despesa para novos participantes. Ajuste o valor total.',
-            ], 422);
-        }
-
-        DB::transaction(function () use ($expense, $participants, $remaining, $nNew) {
-            $base = floor($remaining / $nNew * 100) / 100;
-            $running = 0.0;
-
-            foreach ($participants as $index => $p) {
-                $isLast = $index === $nNew - 1;
-                $amount = $isLast
-                    ? round($remaining - $running, 2)
-                    : $base;
-                $running += $amount;
-
+        DB::transaction(function () use ($expense, $participants, $expenseService) {
+            foreach ($participants as $p) {
                 $member = TeamMember::create([
                     'team_id' => $expense->team_id,
                     'user_id' => null,
@@ -159,19 +182,14 @@ class PublicExpenseController extends Controller
                     'team_member_id' => $member->id,
                     'expense_id' => $expense->id,
                     'description' => $expense->description,
-                    'amount' => max(0, $amount),
+                    'amount' => 0.0,
                     'due_date' => $expense->due_date,
                     'status' => 'pending',
                 ]);
             }
 
             $expense->refresh();
-            $count = $expense->charges()->count();
-            $expense->update([
-                'amount_per_member' => $count > 0
-                    ? floor((float) $expense->total_amount / $count * 100) / 100
-                    : $expense->amount_per_member,
-            ]);
+            $expenseService->redistributeChargeAmounts($expense);
         });
 
         $expense->refresh()->load(['charges.teamMember', 'charges.paymentProofs']);
@@ -184,6 +202,10 @@ class PublicExpenseController extends Controller
     public function participate(ParticipatePublicExpenseRequest $request, string $hash, PaymentProofService $service): JsonResponse
     {
         $expense = Expense::where('public_hash', $hash)->firstOrFail();
+
+        if ($blocked = $this->rejectIfClosed($expense)) {
+            return $blocked;
+        }
 
         $validated = $request->validated();
 
@@ -247,6 +269,8 @@ class PublicExpenseController extends Controller
                 'total_amount' => $expense->total_amount,
                 'amount_per_member' => $expense->amount_per_member,
                 'due_date' => $expense->due_date,
+                'status' => $expense->status,
+                'is_closed' => $expense->status === 'closed',
                 'pix_key' => $expense->pix_key,
                 'pix_qr_code' => $expense->pix_qr_code,
             ],
@@ -277,6 +301,10 @@ class PublicExpenseController extends Controller
 
         if (! $expense) {
             return response()->json(['message' => 'Not found.'], 404);
+        }
+
+        if ($blocked = $this->rejectIfClosed($expense)) {
+            return $blocked;
         }
 
         $validated = $request->validated();
@@ -364,6 +392,10 @@ class PublicExpenseController extends Controller
             return response()->json(['message' => 'Not found.'], 404);
         }
 
+        if ($blocked = $this->rejectIfClosed($charge->expense)) {
+            return $blocked;
+        }
+
         try {
             $proof = $service->uploadProof($charge, $request->file('file'));
 
@@ -379,6 +411,10 @@ class PublicExpenseController extends Controller
     {
         if (! $charge->expense?->public_hash) {
             return response()->json(['message' => 'Not found.'], 404);
+        }
+
+        if ($blocked = $this->rejectIfClosed($charge->expense)) {
+            return $blocked;
         }
 
         if (! $charge->paymentProofs()->exists()) {
@@ -408,6 +444,10 @@ class PublicExpenseController extends Controller
             return $expense;
         }
 
+        if ($blocked = $this->rejectIfClosed($expense)) {
+            return $blocked;
+        }
+
         if ($charge->status !== 'proof_sent') {
             return response()->json(['message' => 'Charge must have proof_sent status.'], 422);
         }
@@ -416,14 +456,6 @@ class PublicExpenseController extends Controller
             'status' => 'validated',
             'paid_at' => now(),
         ]);
-
-        $expenseModel = $charge->expense;
-        if ($expenseModel) {
-            $allValidated = $expenseModel->charges()->where('status', '!=', 'validated')->doesntExist();
-            if ($allValidated) {
-                $expenseModel->update(['status' => 'closed']);
-            }
-        }
 
         $charge->load('teamMember');
 
@@ -444,6 +476,10 @@ class PublicExpenseController extends Controller
         $expense = $this->authorizeManage($request, $charge->expense);
         if ($expense instanceof JsonResponse) {
             return $expense;
+        }
+
+        if ($blocked = $this->rejectIfClosed($expense)) {
+            return $blocked;
         }
 
         if ($charge->status !== 'proof_sent') {
@@ -492,6 +528,10 @@ class PublicExpenseController extends Controller
         $auth = $this->authorizeManageToken($request, $expense);
         if ($auth instanceof JsonResponse) {
             return $auth;
+        }
+
+        if ($blocked = $this->rejectIfClosed($expense)) {
+            return $blocked;
         }
 
         if ((int) $member->team_id !== (int) $expense->team_id) {
@@ -586,6 +626,17 @@ class PublicExpenseController extends Controller
         }
 
         return $expense;
+    }
+
+    private function rejectIfClosed(Expense $expense): ?JsonResponse
+    {
+        if ($expense->status === 'closed') {
+            return response()->json([
+                'message' => 'Esta despesa foi finalizada e nao aceita mais alteracoes.',
+            ], 422);
+        }
+
+        return null;
     }
 
     private function resolveManageToken(Request $request): ?string

@@ -26,6 +26,7 @@ Route::prefix('v1')->group(function () {
 
     Route::prefix('public')->group(function () {
         Route::get('/expenses/{hash}', [PublicExpenseController::class, 'show']);
+        Route::patch('/expenses/{hash}/close', [PublicExpenseController::class, 'closeExpense']);
         Route::patch('/expenses/{hash}', [PublicExpenseController::class, 'updateExpense']);
         Route::post('/expenses/{hash}/participants', [PublicExpenseController::class, 'addParticipants']);
         Route::get('/expenses/{hash}/participants/{participantHash}', [PublicExpenseController::class, 'showParticipant']);

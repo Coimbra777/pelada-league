@@ -89,6 +89,10 @@ class Expense extends Model
 
     public function recalculateStatus(): void
     {
+        if ($this->status === 'closed') {
+            return;
+        }
+
         $charges = $this->charges()->get();
 
         if ($charges->isEmpty()) {

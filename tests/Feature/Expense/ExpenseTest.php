@@ -95,9 +95,9 @@ class ExpenseTest extends TestCase
         $total = $charges->sum(fn ($c) => (float) $c->amount);
         $this->assertEquals(10.00, $total);
 
-        $this->assertEquals('3.33', $charges[0]->amount);
+        $this->assertEquals('3.34', $charges[0]->amount);
         $this->assertEquals('3.33', $charges[1]->amount);
-        $this->assertEquals('3.34', $charges[2]->amount);
+        $this->assertEquals('3.33', $charges[2]->amount);
     }
 
     public function test_expense_has_public_hash(): void

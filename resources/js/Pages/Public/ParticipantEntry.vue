@@ -21,6 +21,8 @@ const loading = ref(true);
 const loadError = ref(false);
 const expense = ref(null);
 
+const isExpenseClosed = computed(() => expense.value?.status === 'closed');
+
 const name = ref('');
 const phone = ref('');
 const file = ref(null);
@@ -98,6 +100,9 @@ onMounted(async () => {
 });
 
 async function submit() {
+    if (isExpenseClosed.value) {
+        return;
+    }
     fieldErrors.value = {};
     const trimmedName = name.value.trim();
     const phoneDigits = phone.value.replace(/\D/g, '');
@@ -223,9 +228,22 @@ async function submit() {
             </p>
         </section>
 
+        <!-- Despesa encerrada -->
+        <section
+            v-if="isExpenseClosed"
+            class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-6 text-center space-y-2"
+        >
+            <p class="text-lg font-semibold text-emerald-900">
+                Esta despesa ja foi finalizada pelo responsavel.
+            </p>
+            <p class="text-sm text-emerald-800">
+                Nao e possivel enviar comprovantes por aqui.
+            </p>
+        </section>
+
         <!-- Bloco 3: sucesso -->
         <section
-            v-if="success"
+            v-else-if="success"
             class="rounded-2xl border border-green-200 bg-green-50 px-4 py-6 text-center space-y-2"
         >
             <p class="text-lg font-semibold text-green-900">

@@ -25,7 +25,10 @@ class ExpenseService
 
         $memberCount = $members->count();
         $totalAmount = (float) $data['total_amount'];
-        $baseAmount = floor($totalAmount / $memberCount * 100) / 100;
+        $totalCents = (int) round($totalAmount * 100);
+        $baseCents = intdiv($totalCents, $memberCount);
+        $remainder = $totalCents % $memberCount;
+        $baseAmount = round($baseCents / 100, 2);
 
         $expense = Expense::create([
             'team_id' => $team->id,
@@ -42,10 +45,8 @@ class ExpenseService
         ]);
 
         foreach ($members as $index => $member) {
-            $isLast = $index === $memberCount - 1;
-            $amount = $isLast
-                ? round($totalAmount - ($baseAmount * ($memberCount - 1)), 2)
-                : $baseAmount;
+            $cents = $baseCents + ($index < $remainder ? 1 : 0);
+            $amount = round($cents / 100, 2);
 
             try {
                 $charge = Charge::create([
@@ -73,6 +74,10 @@ class ExpenseService
 
     public function updateExpense(Expense $expense, array $data): Expense
     {
+        if ($expense->status === 'closed') {
+            throw new \DomainException('Esta despesa foi finalizada e nao aceita mais alteracoes.');
+        }
+
         $oldTotal = (float) $expense->total_amount;
         $newTotal = (float) $data['total_amount'];
 
@@ -92,7 +97,7 @@ class ExpenseService
                     'Nao e possivel alterar o valor total enquanto houver cobranca enviada, paga ou validada.'
                 );
             }
-            $this->redistributeCharges($expense->fresh());
+            $this->redistributeChargeAmounts($expense->fresh());
         } else {
             $expense->charges()->update([
                 'description' => $expense->description,
@@ -108,13 +113,17 @@ class ExpenseService
      */
     public function addParticipantsToExpense(Team $team, Expense $expense, array $participants): Expense
     {
+        if ($expense->status === 'closed') {
+            throw new \DomainException('Esta despesa foi finalizada e nao aceita mais alteracoes.');
+        }
+
         if ($expense->team_id !== $team->id) {
             throw new \DomainException('Despesa nao pertence a esta equipe.');
         }
 
         if ($expense->charges()->where('status', '!=', 'pending')->exists()) {
             throw new \DomainException(
-                'So e possivel incluir participantes enquanto todas as cobrancas estao pendentes.'
+                'Não é possível redistribuir valores pois já existem pagamentos em andamento.'
             );
         }
 
@@ -149,7 +158,7 @@ class ExpenseService
                 'user_id' => $member->user_id,
                 'expense_id' => $expense->id,
                 'description' => $expense->description,
-                'amount' => 0,
+                'amount' => 0.0,
                 'due_date' => $expense->due_date,
                 'status' => 'pending',
             ]);
@@ -162,7 +171,7 @@ class ExpenseService
             );
         }
 
-        $this->redistributeCharges($expense->fresh());
+        $this->redistributeChargeAmounts($expense->fresh());
 
         foreach ($newChargeIds as $chargeId) {
             $charge = Charge::query()->with('teamMember')->find($chargeId);
@@ -185,7 +194,11 @@ class ExpenseService
         return $expense->fresh()->load('charges.teamMember');
     }
 
-    private function redistributeCharges(Expense $expense): void
+    /**
+     * Reparte o total da despesa em centavos entre todas as cobranças (ordem por id).
+     * A soma dos amounts coincide com total_amount; centavos restantes vão às primeiras cobranças.
+     */
+    public function redistributeChargeAmounts(Expense $expense): void
     {
         $charges = $expense->charges()->orderBy('id')->get();
         $count = $charges->count();
@@ -193,14 +206,13 @@ class ExpenseService
             return;
         }
 
-        $total = (float) $expense->total_amount;
-        $base = floor($total / $count * 100) / 100;
+        $totalCents = (int) round((float) $expense->total_amount * 100);
+        $baseCents = intdiv($totalCents, $count);
+        $remainder = $totalCents % $count;
 
         foreach ($charges as $index => $charge) {
-            $isLast = $index === $count - 1;
-            $amount = $isLast
-                ? round($total - ($base * ($count - 1)), 2)
-                : $base;
+            $cents = $baseCents + ($index < $remainder ? 1 : 0);
+            $amount = round($cents / 100, 2);
 
             $charge->update([
                 'amount' => $amount,
@@ -209,6 +221,6 @@ class ExpenseService
             ]);
         }
 
-        $expense->update(['amount_per_member' => $base]);
+        $expense->update(['amount_per_member' => round($baseCents / 100, 2)]);
     }
 }

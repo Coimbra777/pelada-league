@@ -5,6 +5,7 @@ const props = defineProps({
     member: { type: Object, required: true },
     isAdmin: { type: Boolean, default: false },
     showResend: { type: Boolean, default: false },
+    moderationEnabled: { type: Boolean, default: true },
 });
 
 const emit = defineEmits(['validate', 'reject', 'viewProof', 'resend', 'copyParticipantLink']);
@@ -28,7 +29,7 @@ const canResend = props.showResend && ['pending', 'rejected', 'proof_sent'].incl
             <span class="text-sm font-semibold text-gray-900 whitespace-nowrap">{{ formatCurrency(member.amount) }}</span>
             <StatusBadge :status="status" />
         </div>
-        <div v-if="isAdmin && member.participant_url" class="w-full sm:w-auto mt-1 sm:mt-0">
+        <div v-if="moderationEnabled && isAdmin && member.participant_url" class="w-full sm:w-auto mt-1 sm:mt-0">
             <button
                 type="button"
                 class="w-full sm:w-auto px-3 py-2 text-xs font-medium text-gray-700 bg-gray-100 rounded-lg min-h-[44px]"
@@ -48,32 +49,28 @@ const canResend = props.showResend && ['pending', 'rejected', 'proof_sent'].incl
         </div>
         <div v-if="isAdmin" class="flex flex-wrap gap-1 sm:ml-2 sm:justify-end">
             <button
-                v-if="status === 'proof_sent'"
-                @click="emit('viewProof', member.charge_id)"
+                v-if="['proof_sent', 'validated', 'rejected'].includes(status)"
+                type="button"
                 class="px-2 py-1.5 text-xs text-indigo-600 hover:bg-indigo-50 rounded min-h-[44px] sm:min-h-0"
+                @click="emit('viewProof', member.charge_id)"
             >
                 Ver comprovante
             </button>
             <button
-                v-if="status === 'proof_sent'"
-                @click="emit('validate', member.charge_id)"
+                v-if="moderationEnabled && status === 'proof_sent'"
+                type="button"
                 class="px-2 py-1 text-xs text-green-700 hover:bg-green-50 rounded font-medium"
+                @click="emit('validate', member.charge_id)"
             >
                 Validar
             </button>
             <button
-                v-if="status === 'proof_sent'"
-                @click="emit('reject', member.charge_id)"
+                v-if="moderationEnabled && status === 'proof_sent'"
+                type="button"
                 class="px-2 py-1 text-xs text-red-700 hover:bg-red-50 rounded font-medium"
+                @click="emit('reject', member.charge_id)"
             >
                 Rejeitar
-            </button>
-            <button
-                v-if="status === 'validated' || status === 'rejected'"
-                @click="emit('viewProof', member.charge_id)"
-                class="px-2 py-1.5 text-xs text-indigo-600 hover:bg-indigo-50 rounded min-h-[44px] sm:min-h-0"
-            >
-                Ver comprovante
             </button>
         </div>
     </div>

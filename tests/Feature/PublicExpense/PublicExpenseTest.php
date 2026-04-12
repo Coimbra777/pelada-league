@@ -74,6 +74,49 @@ class PublicExpenseTest extends TestCase
         return [$expense, $charge1, $charge2, $admin, $team];
     }
 
+    /**
+     * @return array{0: Expense, 1: Charge}
+     */
+    private function createPublicExpenseWithOneParticipant500(): array
+    {
+        $admin = User::factory()->create();
+        $team = Team::factory()->create(['owner_id' => $admin->id]);
+
+        $member = TeamMember::create([
+            'team_id' => $team->id,
+            'unique_hash' => 'participant-hash-only',
+            'name' => 'Unico Participante',
+            'phone' => '11000000001',
+            'role' => 'member',
+        ]);
+
+        $expense = Expense::create([
+            'team_id' => $team->id,
+            'created_by' => $admin->id,
+            'owner_name' => 'Dono Teste',
+            'owner_phone' => '11988887777',
+            'description' => 'Rateio',
+            'total_amount' => 500.00,
+            'amount_per_member' => 500.00,
+            'due_date' => now()->addDays(3)->format('Y-m-d'),
+            'pix_key' => '11999999999',
+            'pix_qr_code' => base64_encode('fake-qr'),
+            'status' => 'open',
+            'public_hash' => 'test-hash-500',
+            'manage_token' => 'manage-token-secret',
+        ]);
+
+        $charge = Charge::create([
+            'expense_id' => $expense->id,
+            'team_member_id' => $member->id,
+            'amount' => 500.00,
+            'due_date' => $expense->due_date,
+            'status' => 'pending',
+        ]);
+
+        return [$expense, $charge];
+    }
+
     public function test_public_expense_page_returns_data(): void
     {
         [$expense] = $this->createExpenseWithCharges();
@@ -440,6 +483,40 @@ class PublicExpenseTest extends TestCase
         $response->assertStatus(201);
         $expenseId = Expense::where('public_hash', 'test-hash-123')->value('id');
         $this->assertEquals(3, Charge::where('expense_id', $expenseId)->count());
+
+        $charges = Charge::where('expense_id', $expenseId)->orderBy('id')->get();
+        $this->assertEquals(150.0, round($charges->sum(fn ($c) => (float) $c->amount), 2));
+    }
+
+    public function test_add_public_participants_redistributes_full_total_evenly(): void
+    {
+        [$expense] = $this->createPublicExpenseWithOneParticipant500();
+
+        $this->postJson('/api/v1/public/expenses/test-hash-500/participants?manage='.urlencode('manage-token-secret'), [
+            'participants' => [
+                ['name' => 'Segundo', 'phone' => '11977776666'],
+            ],
+        ])->assertStatus(201);
+
+        $charges = Charge::where('expense_id', $expense->id)->orderBy('id')->get();
+        $this->assertCount(2, $charges);
+        $this->assertEquals(500.0, round($charges->sum(fn ($c) => (float) $c->amount), 2));
+        $this->assertEquals(250.0, (float) $charges[0]->amount);
+        $this->assertEquals(250.0, (float) $charges[1]->amount);
+    }
+
+    public function test_add_public_participants_rejects_when_payments_in_progress(): void
+    {
+        $this->createExpenseWithCharges();
+        Charge::query()->update(['status' => 'proof_sent']);
+
+        $this->postJson('/api/v1/public/expenses/test-hash-123/participants?manage='.urlencode('manage-token-secret'), [
+            'participants' => [
+                ['name' => 'Novo', 'phone' => '11977776666'],
+            ],
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Não é possível redistribuir valores pois já existem pagamentos em andamento.');
     }
 
     public function test_add_public_participants_rejects_duplicate_phone(): void
@@ -483,5 +560,118 @@ class PublicExpenseTest extends TestCase
         $this->postJson('/api/v1/public/expenses/test-hash-123/participants/'.$memberId.'/resend-link', [
             'manage_token' => 'manage-token-secret',
         ])->assertStatus(422);
+    }
+
+    public function test_close_expense_forbidden_without_manage_token(): void
+    {
+        $this->createExpenseWithCharges();
+        Charge::query()->update(['status' => 'validated']);
+
+        $this->patchJson('/api/v1/public/expenses/test-hash-123/close')
+            ->assertForbidden()
+            ->assertJsonPath('message', 'Forbidden.');
+    }
+
+    public function test_close_expense_rejects_when_any_charge_not_validated(): void
+    {
+        $this->createExpenseWithCharges();
+
+        $this->patchJson('/api/v1/public/expenses/test-hash-123/close?manage='.urlencode('manage-token-secret'))
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'So e possivel finalizar quando todos os participantes estiverem com pagamento validado.');
+    }
+
+    public function test_close_expense_rejects_when_charge_is_proof_sent(): void
+    {
+        [, $charge1, $charge2] = $this->createExpenseWithCharges();
+        $charge1->update(['status' => 'validated']);
+        $charge2->update(['status' => 'proof_sent']);
+
+        $this->patchJson('/api/v1/public/expenses/test-hash-123/close?manage='.urlencode('manage-token-secret'))
+            ->assertStatus(422);
+    }
+
+    public function test_close_expense_rejects_when_charge_is_rejected(): void
+    {
+        [, $charge1, $charge2] = $this->createExpenseWithCharges();
+        $charge1->update(['status' => 'validated']);
+        $charge2->update(['status' => 'rejected']);
+
+        $this->patchJson('/api/v1/public/expenses/test-hash-123/close?manage='.urlencode('manage-token-secret'))
+            ->assertStatus(422);
+    }
+
+    public function test_close_expense_succeeds_when_all_charges_validated(): void
+    {
+        $this->createExpenseWithCharges();
+        Charge::query()->update(['status' => 'validated']);
+
+        $this->patchJson('/api/v1/public/expenses/test-hash-123/close?manage='.urlencode('manage-token-secret'))
+            ->assertOk()
+            ->assertJsonPath('expense.status', 'closed')
+            ->assertJsonPath('expense.is_closed', true);
+
+        $this->assertDatabaseHas('expenses', [
+            'public_hash' => 'test-hash-123',
+            'status' => 'closed',
+        ]);
+    }
+
+    public function test_close_expense_returns_422_when_already_closed(): void
+    {
+        $this->createExpenseWithCharges();
+        Charge::query()->update(['status' => 'validated']);
+        $this->patchJson('/api/v1/public/expenses/test-hash-123/close?manage='.urlencode('manage-token-secret'))
+            ->assertOk();
+
+        $this->patchJson('/api/v1/public/expenses/test-hash-123/close?manage='.urlencode('manage-token-secret'))
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Esta despesa ja foi finalizada.');
+    }
+
+    public function test_public_actions_blocked_after_expense_closed(): void
+    {
+        Storage::fake('local');
+        [, , $charge2] = $this->createExpenseWithCharges();
+        Charge::query()->update(['status' => 'validated']);
+
+        $this->patchJson('/api/v1/public/expenses/test-hash-123/close?manage='.urlencode('manage-token-secret'))
+            ->assertOk();
+
+        $msg = 'Esta despesa foi finalizada e nao aceita mais alteracoes.';
+
+        $this->patchJson('/api/v1/public/expenses/test-hash-123?manage='.urlencode('manage-token-secret'), [
+            'description' => 'X',
+            'amount' => 99,
+            'due_date' => now()->format('Y-m-d'),
+            'pix_key' => 'k',
+        ])->assertStatus(422)->assertJsonPath('message', $msg);
+
+        $this->postJson('/api/v1/public/expenses/test-hash-123/participants?manage='.urlencode('manage-token-secret'), [
+            'participants' => [['name' => 'Novo', 'phone' => '11911112222']],
+        ])->assertStatus(422)->assertJsonPath('message', $msg);
+
+        $memberId = $charge2->teamMember->id;
+        $this->postJson('/api/v1/public/expenses/test-hash-123/participants/'.$memberId.'/resend-link', [
+            'manage_token' => 'manage-token-secret',
+        ])->assertStatus(422)->assertJsonPath('message', $msg);
+
+        $file = UploadedFile::fake()->create('c.jpg', 100, 'image/jpeg');
+        $this->postJson("/api/v1/public/charges/{$charge2->id}/upload-proof", ['file' => $file])
+            ->assertStatus(422)->assertJsonPath('message', $msg);
+
+        $this->patchJson("/api/v1/public/charges/{$charge2->id}/validate", [
+            'manage_token' => 'manage-token-secret',
+        ])->assertStatus(422)->assertJsonPath('message', $msg);
+
+        $this->patchJson("/api/v1/public/charges/{$charge2->id}/reject", [
+            'manage_token' => 'manage-token-secret',
+        ])->assertStatus(422)->assertJsonPath('message', $msg);
+
+        $this->post('/api/v1/public/expenses/test-hash-123/participate', [
+            'name' => 'Visitante',
+            'phone' => '11988776655',
+            'proof' => UploadedFile::fake()->create('p.jpg', 100, 'image/jpeg'),
+        ])->assertStatus(422)->assertJsonPath('message', $msg);
     }
 }

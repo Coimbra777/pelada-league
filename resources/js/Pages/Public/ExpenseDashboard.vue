@@ -15,6 +15,9 @@ import MemberList from '../../Components/MemberList.vue';
 import WhatsAppShareButton from '../../Components/WhatsAppShareButton.vue';
 import ProofViewerModal from '../../Components/ProofViewerModal.vue';
 import StatusBadge from '../../Components/StatusBadge.vue';
+import Modal from '../../Components/Modal.vue';
+import Button from '../../Components/Button.vue';
+import ExpenseSummary from '../../Components/ExpenseSummary.vue';
 import { getByHash, saveExpense } from '../../Services/localExpenses.js';
 
 defineOptions({ layout: PublicLayout });
@@ -67,6 +70,22 @@ const publicLink = computed(() => {
 const isParticipantMode = computed(() => !props.manage);
 
 const isAdminDashboard = computed(() => !!props.manage && !!store.expense?.can_manage);
+
+const isClosed = computed(() => store.expense?.status === 'closed');
+
+const adminMembers = computed(() => store.expense?.members ?? []);
+
+const canFinalizeExpense = computed(() => {
+    const m = adminMembers.value;
+    return m.length > 0 && m.every((x) => x.charge_status === 'validated');
+});
+
+const showFinalizeButton = computed(() => isAdminDashboard.value && !isClosed.value);
+
+const moderationEnabled = computed(() => isAdminDashboard.value && !isClosed.value);
+
+const showCloseConfirmModal = ref(false);
+const closeSubmitting = ref(false);
 
 const showEditModal = ref(false);
 const editDescription = ref('');
@@ -341,6 +360,26 @@ async function resendMember(memberId) {
         toast.error(err.data?.message || 'Nao foi possivel gerar o link.');
     }
 }
+
+function openCloseConfirm() {
+    if (!canFinalizeExpense.value) return;
+    showCloseConfirmModal.value = true;
+}
+
+async function confirmCloseExpense() {
+    if (!props.manage || !canFinalizeExpense.value) return;
+    closeSubmitting.value = true;
+    try {
+        await store.closeExpense(props.hash, props.manage);
+        toast.success('Despesa finalizada. Nenhuma alteracao adicional e permitida.');
+        showCloseConfirmModal.value = false;
+        await store.fetchExpense(props.hash, props.manage);
+    } catch (err) {
+        toast.error(err.data?.message || 'Nao foi possivel finalizar.');
+    } finally {
+        closeSubmitting.value = false;
+    }
+}
 </script>
 
 <template>
@@ -355,7 +394,17 @@ async function resendMember(memberId) {
         <template v-else-if="store.expense && headerExpense">
             <Card class="mb-4">
                 <ExpenseHeader :expense="headerExpense" />
+                <p
+                    v-if="isClosed"
+                    class="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900"
+                >
+                    Despesa finalizada — apenas visualizacao.
+                </p>
             </Card>
+
+            <div v-if="isClosed && isAdminDashboard && headerExpense" class="mb-4">
+                <ExpenseSummary :expense="headerExpense" />
+            </div>
 
             <!-- Participante: PIX + participar -->
             <template v-if="isParticipantMode">
@@ -363,7 +412,19 @@ async function resendMember(memberId) {
                     <PixCard :pix-key="store.expense.pix_key" :pix-qr-code="store.expense.pix_qr_code || null" />
 
                     <div
-                        v-if="participationDone"
+                        v-if="isClosed"
+                        class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-center"
+                    >
+                        <p class="text-sm font-semibold text-emerald-900">
+                            Esta despesa ja foi finalizada pelo responsavel.
+                        </p>
+                        <p class="text-xs text-emerald-800/90 mt-2">
+                            Nao e possivel enviar comprovantes nem alterar dados por aqui.
+                        </p>
+                    </div>
+
+                    <div
+                        v-else-if="participationDone"
                         class="rounded-xl border border-green-200 bg-green-50 px-4 py-4 text-center"
                     >
                         <p class="text-sm font-medium text-green-900">
@@ -374,7 +435,7 @@ async function resendMember(memberId) {
                         </p>
                     </div>
 
-                    <template v-else>
+                    <template v-else-if="!isClosed">
                         <button
                             v-if="!showParticipateForm"
                             type="button"
@@ -458,60 +519,78 @@ async function resendMember(memberId) {
             <!-- Admin: editar, novos participantes, compartilhar, PIX -->
             <div v-else class="space-y-4 mb-4">
                 <div v-if="isAdminDashboard" class="space-y-3">
-                    <button
-                        type="button"
-                        class="w-full min-h-[48px] rounded-xl border border-gray-300 bg-white px-4 text-sm font-medium text-gray-800 shadow-sm active:bg-gray-50"
-                        @click="openEditModal"
-                    >
-                        Editar despesa
-                    </button>
+                    <div v-if="showFinalizeButton" class="space-y-1">
+                        <button
+                            type="button"
+                            class="w-full min-h-[48px] rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white shadow-sm active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            :disabled="!canFinalizeExpense"
+                            :title="!canFinalizeExpense ? 'Ainda existem participantes pendentes' : ''"
+                            @click="openCloseConfirm"
+                        >
+                            Finalizar despesa
+                        </button>
+                        <p v-if="!canFinalizeExpense" class="text-xs text-amber-800">
+                            Finalizar so fica disponivel quando todos os pagamentos estiverem validados.
+                        </p>
+                    </div>
 
-                    <Card title="Adicionar participantes">
-                        <div class="space-y-3">
-                            <div>
-                                <label class="block text-xs font-medium text-gray-600 mb-1">Nome</label>
-                                <input
-                                    v-model="addParticipantName"
-                                    type="text"
-                                    autocomplete="name"
-                                    class="w-full min-h-[44px] rounded-xl border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    <template v-if="!isClosed">
+                        <button
+                            type="button"
+                            class="w-full min-h-[48px] rounded-xl border border-gray-300 bg-white px-4 text-sm font-medium text-gray-800 shadow-sm active:bg-gray-50"
+                            @click="openEditModal"
+                        >
+                            Editar despesa
+                        </button>
+
+                        <Card title="Adicionar participantes">
+                            <div class="space-y-3">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">Nome</label>
+                                    <input
+                                        v-model="addParticipantName"
+                                        type="text"
+                                        autocomplete="name"
+                                        class="w-full min-h-[44px] rounded-xl border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">Telefone</label>
+                                    <input
+                                        :value="addParticipantPhone"
+                                        type="tel"
+                                        inputmode="tel"
+                                        autocomplete="tel"
+                                        placeholder="(11) 99999-9999"
+                                        class="w-full min-h-[44px] rounded-xl border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        @input="onAddParticipantPhoneInput"
+                                    />
+                                </div>
+                                <p class="text-xs text-gray-500">
+                                    Opcional: cole varias linhas (estilo WhatsApp), uma pessoa por linha —
+                                    <span class="font-mono">Nome 11999998888</span>
+                                </p>
+                                <textarea
+                                    v-model="participantsText"
+                                    rows="3"
+                                    class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm min-h-[80px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    placeholder="Maria Silva 11988776655"
                                 />
+                                <p v-if="addParticipantsError" class="text-sm text-red-600">{{ addParticipantsError }}</p>
+                                <button
+                                    type="button"
+                                    class="w-full min-h-[48px] rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+                                    :disabled="addSubmitting"
+                                    @click="submitAddParticipants"
+                                >
+                                    {{ addSubmitting ? 'Adicionando...' : 'Adicionar' }}
+                                </button>
                             </div>
-                            <div>
-                                <label class="block text-xs font-medium text-gray-600 mb-1">Telefone</label>
-                                <input
-                                    :value="addParticipantPhone"
-                                    type="tel"
-                                    inputmode="tel"
-                                    autocomplete="tel"
-                                    placeholder="(11) 99999-9999"
-                                    class="w-full min-h-[44px] rounded-xl border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                    @input="onAddParticipantPhoneInput"
-                                />
-                            </div>
-                            <p class="text-xs text-gray-500">
-                                Opcional: cole varias linhas (estilo WhatsApp), uma pessoa por linha — <span class="font-mono">Nome 11999998888</span>
-                            </p>
-                            <textarea
-                                v-model="participantsText"
-                                rows="3"
-                                class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm min-h-[80px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                placeholder="Maria Silva 11988776655"
-                            />
-                            <p v-if="addParticipantsError" class="text-sm text-red-600">{{ addParticipantsError }}</p>
-                            <button
-                                type="button"
-                                class="w-full min-h-[48px] rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
-                                :disabled="addSubmitting"
-                                @click="submitAddParticipants"
-                            >
-                                {{ addSubmitting ? 'Adicionando...' : 'Adicionar' }}
-                            </button>
-                        </div>
-                    </Card>
+                        </Card>
+                    </template>
                 </div>
 
-                <div v-if="store.expense.can_manage && publicLink" class="rounded-xl border border-gray-200 bg-white px-4 py-4 space-y-3">
+                <div v-if="store.expense.can_manage && publicLink && !isClosed" class="rounded-xl border border-gray-200 bg-white px-4 py-4 space-y-3">
                     <p class="text-sm text-gray-700 leading-relaxed">
                         Compartilhe este link com os participantes para que eles possam pagar
                     </p>
@@ -629,7 +708,8 @@ async function resendMember(memberId) {
                     v-else
                     :members="store.expense.members || []"
                     :is-admin="!!store.expense.can_manage"
-                    :show-resend="!!store.expense.can_manage"
+                    :show-resend="!!store.expense.can_manage && moderationEnabled"
+                    :moderation-enabled="moderationEnabled"
                     @validate="validateCharge"
                     @reject="rejectCharge"
                     @view-proof="openProof"
@@ -637,6 +717,26 @@ async function resendMember(memberId) {
                     @copy-participant-link="copyParticipantUrl"
                 />
             </Card>
+
+            <Modal
+                :show="showCloseConfirmModal"
+                title="Finalizar despesa"
+                max-width="md"
+                @close="showCloseConfirmModal = false"
+            >
+                <p class="text-sm text-gray-700">
+                    Tem certeza que deseja finalizar esta despesa? Apos finalizar, nao sera possivel fazer alteracoes,
+                    incluir participantes nem validar pagamentos.
+                </p>
+                <template #footer>
+                    <Button variant="secondary" class="min-h-[48px]" @click="showCloseConfirmModal = false">
+                        Cancelar
+                    </Button>
+                    <Button variant="success" class="min-h-[48px]" :loading="closeSubmitting" @click="confirmCloseExpense">
+                        Confirmar
+                    </Button>
+                </template>
+            </Modal>
         </template>
 
         <Card v-else-if="store.error || !store.expense">

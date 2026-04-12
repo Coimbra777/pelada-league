@@ -119,6 +119,14 @@ export const usePublicExpenseStore = defineStore('publicExpense', {
             return data;
         },
 
+        async closeExpense(hash, manageToken) {
+            this.error = null;
+            const q = manageToken ? `?manage=${encodeURIComponent(manageToken)}` : '';
+            const data = await api.patch(`/public/expenses/${hash}/close${q}`, {});
+            this.expense = data.expense;
+            return data;
+        },
+
         async addExpenseParticipants(hash, manageToken, payload) {
             this.error = null;
             const q = manageToken ? `?manage=${encodeURIComponent(manageToken)}` : '';

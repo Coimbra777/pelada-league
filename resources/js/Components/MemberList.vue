@@ -6,6 +6,8 @@ const props = defineProps({
     members: { type: Array, required: true },
     isAdmin: { type: Boolean, default: false },
     showResend: { type: Boolean, default: false },
+    /** Quando false, oculta validar/rejeitar/reenviar/copiar link; mantem ver comprovante para leitura */
+    moderationEnabled: { type: Boolean, default: true },
 });
 
 const emit = defineEmits(['validate', 'reject', 'viewProof', 'resend', 'copyParticipantLink']);
@@ -30,6 +32,7 @@ const sorted = computed(() => {
             :member="member"
             :is-admin="isAdmin"
             :show-resend="showResend"
+            :moderation-enabled="moderationEnabled"
             @validate="emit('validate', $event)"
             @reject="emit('reject', $event)"
             @view-proof="emit('viewProof', $event)"

@@ -44,7 +44,16 @@ const participant = computed(() => bundle.value?.participant);
 const expenseDeep = computed(() => bundle.value?.expense);
 const members = computed(() => bundle.value?.members ?? []);
 
-const canUpload = computed(() => charge.value && ['pending', 'rejected'].includes(charge.value.status));
+const isExpenseClosedDeep = computed(() => expenseDeep.value?.status === 'closed');
+
+const isGroupExpenseClosed = computed(() => store.expense?.status === 'closed');
+
+const canUpload = computed(
+    () =>
+        charge.value
+        && ['pending', 'rejected'].includes(charge.value.status)
+        && !isExpenseClosedDeep.value,
+);
 const waitingApproval = computed(() => charge.value?.status === 'proof_sent');
 const done = computed(() => charge.value?.status === 'validated');
 const rejected = computed(() => charge.value?.status === 'rejected');
@@ -239,7 +248,19 @@ async function copyPublicLinkGroup() {
                     <PixCard :pix-key="store.expense.pix_key" :pix-qr-code="store.expense.pix_qr_code || null" />
 
                     <div
-                        v-if="participationDone"
+                        v-if="isGroupExpenseClosed"
+                        class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-center"
+                    >
+                        <p class="text-sm font-semibold text-emerald-900">
+                            Esta despesa ja foi finalizada pelo responsavel.
+                        </p>
+                        <p class="text-xs text-emerald-800/90 mt-2">
+                            Nao e possivel enviar comprovantes por aqui.
+                        </p>
+                    </div>
+
+                    <div
+                        v-else-if="participationDone"
                         class="rounded-xl border border-green-200 bg-green-50 px-4 py-4 text-center"
                     >
                         <p class="text-sm font-medium text-green-900">
@@ -250,7 +271,7 @@ async function copyPublicLinkGroup() {
                         </p>
                     </div>
 
-                    <template v-else>
+                    <template v-else-if="!isGroupExpenseClosed">
                         <button
                             v-if="!showParticipateForm"
                             type="button"
@@ -404,6 +425,17 @@ async function copyPublicLinkGroup() {
                         <StatusBadge status="proof_sent" />
                         <p class="text-sm text-gray-700 font-medium">Aguardando aprovacao do responsavel.</p>
                         <p class="text-xs text-gray-500">Voce nao precisa enviar outro comprovante.</p>
+                    </div>
+                </Card>
+
+                <Card v-else-if="isExpenseClosedDeep" class="mb-4 border-emerald-200 bg-emerald-50">
+                    <div class="text-center py-4 space-y-2">
+                        <p class="text-sm font-semibold text-emerald-900">
+                            Esta despesa ja foi finalizada pelo responsavel.
+                        </p>
+                        <p class="text-xs text-emerald-800">
+                            Nao e possivel enviar comprovantes nem alterar dados por aqui.
+                        </p>
                     </div>
                 </Card>
 
