@@ -1,0 +1,206 @@
+<?php
+
+namespace Tests\Feature\PaymentValidation;
+
+use App\Models\Charge;
+use App\Models\Expense;
+use App\Models\PaymentProof;
+use App\Models\Team;
+use App\Models\TeamMember;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
+use Tests\TestCase;
+
+class PaymentValidationTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private function createExpenseSetup(): array
+    {
+        $admin = User::factory()->create();
+        $team = Team::factory()->create(['owner_id' => $admin->id]);
+
+        TeamMember::create([
+            'team_id' => $team->id,
+            'user_id' => $admin->id,
+            'name' => $admin->name,
+            'phone' => '11000000001',
+            'email' => $admin->email,
+            'role' => 'admin',
+        ]);
+
+        $member = TeamMember::create([
+            'team_id' => $team->id,
+            'name' => 'Maria',
+            'phone' => '11000000002',
+            'role' => 'member',
+        ]);
+
+        $expense = Expense::create([
+            'team_id' => $team->id,
+            'created_by' => $admin->id,
+            'description' => 'Test expense',
+            'total_amount' => 100.00,
+            'amount_per_member' => 50.00,
+            'due_date' => now()->addDays(3)->format('Y-m-d'),
+            'pix_key' => '11999999999',
+            'status' => 'open',
+            'public_hash' => 'val-hash-123',
+        ]);
+
+        $charge1 = Charge::create([
+            'expense_id' => $expense->id,
+            'team_member_id' => TeamMember::where('user_id', $admin->id)->first()->id,
+            'amount' => 50.00,
+            'due_date' => $expense->due_date,
+            'status' => 'proof_sent',
+        ]);
+
+        $charge2 = Charge::create([
+            'expense_id' => $expense->id,
+            'team_member_id' => $member->id,
+            'amount' => 50.00,
+            'due_date' => $expense->due_date,
+            'status' => 'proof_sent',
+        ]);
+
+        PaymentProof::create([
+            'charge_id' => $charge1->id,
+            'file_path' => 'payment-proofs/1/proof.jpg',
+            'original_filename' => 'comprovante1.jpg',
+            'mime_type' => 'image/jpeg',
+            'status' => 'pending',
+        ]);
+
+        PaymentProof::create([
+            'charge_id' => $charge2->id,
+            'file_path' => 'payment-proofs/2/proof.jpg',
+            'original_filename' => 'comprovante2.jpg',
+            'mime_type' => 'image/jpeg',
+            'status' => 'pending',
+        ]);
+
+        return [$admin, $team, $expense, $charge1, $charge2, $member];
+    }
+
+    public function test_admin_can_validate_charge(): void
+    {
+        [$admin, , , $charge1] = $this->createExpenseSetup();
+
+        $response = $this->actingAs($admin, 'sanctum')
+            ->patchJson("/api/v1/charges/{$charge1->id}/validate");
+
+        $response->assertOk()
+            ->assertJsonPath('charge.status', 'validated');
+
+        $this->assertDatabaseHas('charges', [
+            'id' => $charge1->id,
+            'status' => 'validated',
+        ]);
+        $this->assertNotNull($charge1->fresh()->paid_at);
+    }
+
+    public function test_admin_can_reject_charge(): void
+    {
+        [$admin, , , , $charge2] = $this->createExpenseSetup();
+
+        $response = $this->actingAs($admin, 'sanctum')
+            ->patchJson("/api/v1/charges/{$charge2->id}/reject");
+
+        $response->assertOk()
+            ->assertJsonPath('charge.status', 'rejected');
+
+        $this->assertDatabaseHas('charges', [
+            'id' => $charge2->id,
+            'status' => 'rejected',
+        ]);
+    }
+
+    public function test_expense_closes_when_all_charges_validated(): void
+    {
+        [$admin, , $expense, $charge1, $charge2] = $this->createExpenseSetup();
+
+        $this->actingAs($admin, 'sanctum')
+            ->patchJson("/api/v1/charges/{$charge1->id}/validate");
+
+        $this->actingAs($admin, 'sanctum')
+            ->patchJson("/api/v1/charges/{$charge2->id}/validate");
+
+        $this->assertDatabaseHas('expenses', [
+            'id' => $expense->id,
+            'status' => 'closed',
+        ]);
+    }
+
+    public function test_expense_stays_open_when_some_pending(): void
+    {
+        [$admin, , $expense, $charge1] = $this->createExpenseSetup();
+
+        $this->actingAs($admin, 'sanctum')
+            ->patchJson("/api/v1/charges/{$charge1->id}/validate");
+
+        $this->assertDatabaseHas('expenses', [
+            'id' => $expense->id,
+            'status' => 'open',
+        ]);
+    }
+
+    public function test_non_admin_cannot_validate(): void
+    {
+        [, , , $charge1, , $member] = $this->createExpenseSetup();
+
+        $regularUser = User::factory()->create();
+
+        $response = $this->actingAs($regularUser, 'sanctum')
+            ->patchJson("/api/v1/charges/{$charge1->id}/validate");
+
+        $response->assertStatus(403);
+    }
+
+    public function test_cannot_validate_pending_charge(): void
+    {
+        [$admin, , $expense] = $this->createExpenseSetup();
+
+        $pendingCharge = Charge::create([
+            'expense_id' => $expense->id,
+            'team_member_id' => TeamMember::first()->id,
+            'amount' => 25.00,
+            'due_date' => $expense->due_date,
+            'status' => 'pending',
+        ]);
+
+        $response = $this->actingAs($admin, 'sanctum')
+            ->patchJson("/api/v1/charges/{$pendingCharge->id}/validate");
+
+        $response->assertStatus(422);
+    }
+
+    public function test_rejected_charge_can_upload_new_proof(): void
+    {
+        Storage::fake('local');
+
+        [$admin, , , , $charge2] = $this->createExpenseSetup();
+
+        // Reject first
+        $this->actingAs($admin, 'sanctum')
+            ->patchJson("/api/v1/charges/{$charge2->id}/reject");
+
+        $this->assertDatabaseHas('charges', ['id' => $charge2->id, 'status' => 'rejected']);
+
+        // Upload new proof
+        $file = UploadedFile::fake()->create('new_proof.jpg', 100, 'image/jpeg');
+        $response = $this->postJson("/api/v1/public/charges/{$charge2->id}/upload-proof", [
+            'file' => $file,
+        ]);
+
+        $response->assertStatus(201);
+
+        // Mark as paid again (rejected charges can be re-submitted)
+        $response = $this->postJson("/api/v1/public/charges/{$charge2->id}/mark-as-paid");
+
+        $response->assertOk()
+            ->assertJsonPath('status', 'proof_sent');
+    }
+}

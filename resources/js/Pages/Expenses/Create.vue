@@ -19,6 +19,8 @@ const form = reactive({
     description: '',
     total_amount: '',
     due_date: '',
+    pix_key: '',
+    pix_qr_code: '',
 });
 const errors = ref({});
 
@@ -31,6 +33,8 @@ async function submit() {
             description: form.description,
             total_amount: Number(form.total_amount),
             due_date: form.due_date,
+            pix_key: form.pix_key,
+            pix_qr_code: form.pix_qr_code || null,
         });
         toast.success('Despesa criada e dividida!');
         router.visit(`/teams/${props.teamId}`);
@@ -75,6 +79,17 @@ async function submit() {
                     <p v-if="errors.total_amount" class="mt-1 text-sm text-red-600">{{ errors.total_amount }}</p>
                 </div>
                 <Input v-model="form.due_date" type="date" label="Vencimento" :min="today" :error="errors.due_date" required />
+                <Input v-model="form.pix_key" label="Chave PIX" placeholder="CPF, telefone, email ou chave aleatoria" :error="errors.pix_key" required />
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">QR Code PIX (opcional)</label>
+                    <textarea
+                        v-model="form.pix_qr_code"
+                        rows="3"
+                        placeholder="Cole aqui o codigo do QR Code PIX (base64 ou copia-e-cola)"
+                        class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-0 focus:border-indigo-500 focus:ring-indigo-500"
+                    />
+                    <p v-if="errors.pix_qr_code" class="mt-1 text-sm text-red-600">{{ errors.pix_qr_code }}</p>
+                </div>
                 <p v-if="expenseStore.error" class="text-sm text-red-600">{{ expenseStore.error }}</p>
                 <Button type="submit" :loading="expenseStore.loading" class="w-full">Criar e Dividir</Button>
             </form>

@@ -2,7 +2,9 @@
 
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\ChargeController;
+use App\Http\Controllers\Api\V1\ChargeValidationController;
 use App\Http\Controllers\Api\V1\ExpenseController;
+use App\Http\Controllers\Api\V1\PublicExpenseController;
 use App\Http\Controllers\Api\V1\TeamController;
 use App\Http\Controllers\Api\V1\TeamMemberController;
 use App\Http\Controllers\Api\V1\WebhookController;
@@ -20,9 +22,26 @@ Route::prefix('v1')->group(function () {
         });
     });
 
+    // Public routes (no auth)
+    Route::prefix('public')->group(function () {
+        Route::get('/expenses/{hash}', [PublicExpenseController::class, 'show']);
+        Route::post('/expenses/{hash}/identify', [PublicExpenseController::class, 'identify']);
+        Route::post('/charges/{charge}/upload-proof', [PublicExpenseController::class, 'uploadProof']);
+        Route::post('/charges/{charge}/mark-as-paid', [PublicExpenseController::class, 'markAsPaid']);
+    });
+
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('/charges', [ChargeController::class, 'store']);
         Route::post('/charges/{charge}/sync', [ChargeController::class, 'sync']);
+
+        // Expense direct access
+        Route::get('/expenses/{expense}', [ExpenseController::class, 'showDirect']);
+        Route::get('/expenses/{expense}/members', [ExpenseController::class, 'members']);
+
+        // Charge validation
+        Route::patch('/charges/{charge}/validate', [ChargeValidationController::class, 'validateCharge']);
+        Route::patch('/charges/{charge}/reject', [ChargeValidationController::class, 'reject']);
+        Route::get('/charges/{charge}/proof', [ChargeValidationController::class, 'downloadProof']);
 
         Route::prefix('teams')->group(function () {
             Route::post('/', [TeamController::class, 'store']);

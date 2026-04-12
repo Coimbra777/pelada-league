@@ -42,3 +42,7 @@ Route::get('/teams/{team}/expenses/{expense}', function (string $team, string $e
 Route::get('/charges/{charge}', function (string $charge) {
     return Inertia::render('Charges/Show', ['id' => $charge]);
 })->name('charges.show');
+
+Route::get('/p/{hash}', function (string $hash) {
+    return Inertia::render('Public/Expense', ['hash' => $hash]);
+})->name('public.expense');

@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Charge extends Model
 {
@@ -47,5 +48,15 @@ class Charge extends Model
     public function teamMember(): BelongsTo
     {
         return $this->belongsTo(TeamMember::class);
+    }
+
+    public function paymentProofs(): HasMany
+    {
+        return $this->hasMany(PaymentProof::class);
+    }
+
+    public function latestProof(): ?PaymentProof
+    {
+        return $this->paymentProofs()->latest()->first();
     }
 }

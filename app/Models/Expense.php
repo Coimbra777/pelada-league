@@ -16,16 +16,31 @@ class Expense extends Model
         'created_by',
         'description',
         'total_amount',
+        'amount_per_member',
         'due_date',
+        'pix_key',
+        'pix_qr_code',
         'status',
+        'public_hash',
     ];
 
     protected function casts(): array
     {
         return [
             'total_amount' => 'decimal:2',
+            'amount_per_member' => 'decimal:2',
             'due_date' => 'date',
         ];
+    }
+
+    public function getPublicUrl(): string
+    {
+        return config('app.url') . '/p/' . $this->public_hash;
+    }
+
+    public function scopeByHash($query, string $hash)
+    {
+        return $query->where('public_hash', $hash);
     }
 
     public function team(): BelongsTo

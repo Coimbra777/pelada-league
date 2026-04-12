@@ -22,6 +22,8 @@ class ChargeResource extends JsonResource
             'created_at' => $this->created_at,
             'user' => new UserResource($this->whenLoaded('user')),
             'member' => new TeamMemberResource($this->whenLoaded('teamMember')),
+            'proof_status' => $this->whenLoaded('paymentProofs', fn () => $this->latestProof()?->status),
+            'has_proof' => $this->whenLoaded('paymentProofs', fn () => $this->paymentProofs->isNotEmpty()),
         ];
     }
 }

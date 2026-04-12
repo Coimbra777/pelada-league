@@ -12,11 +12,15 @@ class NotificationService
 {
     public function __construct(private ApiWhatsappHelper $whatsappHelper) {}
 
-    public function sendChargeNotification(TeamMember $member, Charge $charge): void
+    public function sendChargeNotification(TeamMember $member, Charge $charge, ?\App\Models\Expense $expense = null): void
     {
         $message = "Ola {$member->name}! Voce tem uma cobranca de R$ {$charge->amount} "
             . "com vencimento em {$charge->due_date->format('d/m/Y')}. "
             . "Descricao: {$charge->description}";
+
+        if ($expense?->public_hash) {
+            $message .= "\nAcesse o link para pagar: {$expense->getPublicUrl()}";
+        }
 
         if ($member->phone) {
             $sent = $this->whatsappHelper->send($member->phone, $message);

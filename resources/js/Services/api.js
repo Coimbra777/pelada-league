@@ -49,11 +49,47 @@ async function request(method, endpoint, body = null) {
     return data;
 }
 
+async function upload(endpoint, file, fieldName = 'file') {
+    const headers = {
+        'Accept': 'application/json',
+    };
+
+    const token = getToken();
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const formData = new FormData();
+    formData.append(fieldName, file);
+
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers,
+        body: formData,
+    });
+
+    if (response.status === 401 && endpoint !== '/auth/login') {
+        clearToken();
+        window.location.href = '/login';
+        throw { status: 401, data: { message: 'Unauthorized' } };
+    }
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw { status: response.status, data };
+    }
+
+    return data;
+}
+
 export const api = {
     get: (url) => request('GET', url),
     post: (url, body) => request('POST', url, body),
     put: (url, body) => request('PUT', url, body),
+    patch: (url, body) => request('PATCH', url, body),
     delete: (url) => request('DELETE', url),
+    upload: (url, file, fieldName) => upload(url, file, fieldName),
 };
 
 export { getToken, setToken, clearToken };

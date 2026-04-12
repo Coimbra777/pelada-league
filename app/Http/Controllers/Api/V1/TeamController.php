@@ -80,7 +80,7 @@ class TeamController extends Controller
         $expenseIds = $team->expenses()->pluck('id');
         $charges = Charge::whereIn('expense_id', $expenseIds)->get();
 
-        $paidStatuses = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'];
+        $paidStatuses = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH', 'validated'];
 
         $totalOpen = $charges->reject(fn ($c) => in_array($c->status, $paidStatuses))->sum('amount');
         $totalPaid = $charges->filter(fn ($c) => in_array($c->status, $paidStatuses))->sum('amount');

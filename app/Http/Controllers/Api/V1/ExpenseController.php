@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\StoreExpenseRequest;
+use App\Http\Resources\ChargeResource;
 use App\Http\Resources\ExpenseResource;
 use App\Models\Expense;
 use App\Models\Team;
@@ -67,6 +68,39 @@ class ExpenseController extends Controller
 
         return response()->json([
             'expense' => new ExpenseResource($expense),
+        ]);
+    }
+
+    public function showDirect(Expense $expense): JsonResponse
+    {
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+
+        if (!$expense->team->members()->where('user_id', $user->id)->exists()) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        $expense->load('charges.teamMember', 'charges.paymentProofs');
+
+        return response()->json([
+            'expense' => new ExpenseResource($expense),
+        ]);
+    }
+
+    public function members(Expense $expense): JsonResponse
+    {
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+
+        $membership = $expense->team->members()->where('user_id', $user->id)->first();
+        if (!$membership || $membership->role !== 'admin') {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        $expense->load('charges.teamMember', 'charges.paymentProofs');
+
+        return response()->json([
+            'charges' => ChargeResource::collection($expense->charges),
         ]);
     }
 }

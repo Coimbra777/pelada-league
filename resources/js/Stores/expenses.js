@@ -67,6 +67,47 @@ export const useExpenseStore = defineStore('expenses', {
             }
         },
 
+        async validateCharge(chargeId) {
+            try {
+                const data = await api.patch(`/charges/${chargeId}/validate`);
+                this._updateCharge(chargeId, data.charge);
+                return data.charge;
+            } catch (err) {
+                this.error = err.data?.message || 'Falha ao validar.';
+                throw err;
+            }
+        },
+
+        async rejectCharge(chargeId) {
+            try {
+                const data = await api.patch(`/charges/${chargeId}/reject`);
+                this._updateCharge(chargeId, data.charge);
+                return data.charge;
+            } catch (err) {
+                this.error = err.data?.message || 'Falha ao rejeitar.';
+                throw err;
+            }
+        },
+
+        async fetchExpenseMembers(expenseId) {
+            try {
+                const data = await api.get(`/expenses/${expenseId}/members`);
+                return data.members;
+            } catch (err) {
+                this.error = err.data?.message || 'Falha ao carregar membros.';
+                throw err;
+            }
+        },
+
+        _updateCharge(chargeId, updatedCharge) {
+            if (this.currentExpense?.charges) {
+                const idx = this.currentExpense.charges.findIndex(c => c.id === chargeId);
+                if (idx !== -1) {
+                    this.currentExpense.charges[idx] = updatedCharge;
+                }
+            }
+        },
+
         getChargeById(chargeId) {
             return this.currentExpense?.charges?.find(
                 c => c.id === Number(chargeId)

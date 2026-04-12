@@ -2,17 +2,16 @@
 
 namespace App\Services;
 
+use App\Models\Charge;
 use App\Models\Expense;
 use App\Models\Team;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class ExpenseService
 {
-    public function __construct(
-        private ChargeService $chargeService,
-        private NotificationService $notificationService,
-    ) {}
+    public function __construct(private NotificationService $notificationService) {}
 
     public function createExpenseAndSplit(Team $team, User $creator, array $data): Expense
     {
@@ -31,8 +30,12 @@ class ExpenseService
             'created_by' => $creator->id,
             'description' => $data['description'],
             'total_amount' => $data['total_amount'],
+            'amount_per_member' => $baseAmount,
             'due_date' => $data['due_date'],
+            'pix_key' => $data['pix_key'],
+            'pix_qr_code' => $data['pix_qr_code'] ?? null,
             'status' => 'open',
+            'public_hash' => (string) Str::uuid(),
         ]);
 
         foreach ($members as $index => $member) {
@@ -42,15 +45,17 @@ class ExpenseService
                 : $baseAmount;
 
             try {
-                $charge = $this->chargeService->createChargeForMember($member, [
+                $charge = Charge::create([
+                    'team_member_id' => $member->id,
+                    'user_id' => $member->user_id,
+                    'expense_id' => $expense->id,
                     'description' => $data['description'],
                     'amount' => $amount,
                     'due_date' => $data['due_date'],
+                    'status' => 'pending',
                 ]);
 
-                $charge->update(['expense_id' => $expense->id]);
-
-                $this->notificationService->sendChargeNotification($member, $charge);
+                $this->notificationService->sendChargeNotification($member, $charge, $expense);
             } catch (\Throwable $e) {
                 Log::error('Failed to create charge for team member', [
                     'team_member_id' => $member->id,
