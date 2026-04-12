@@ -4,6 +4,7 @@ import { api } from '../Services/api.js';
 export const usePublicExpenseStore = defineStore('publicExpense', {
     state: () => ({
         expense: null,
+        participantBundle: null,
         members: null,
         selectedMember: null,
         loading: false,
@@ -11,28 +12,53 @@ export const usePublicExpenseStore = defineStore('publicExpense', {
     }),
 
     actions: {
-        async fetchExpense(hash) {
+        reset() {
+            this.expense = null;
+            this.participantBundle = null;
+            this.members = null;
+            this.selectedMember = null;
+            this.error = null;
+        },
+
+        async fetchExpense(hash, manage = null) {
             this.loading = true;
             this.error = null;
             try {
-                const data = await api.get(`/public/expenses/${hash}`);
+                const q = manage ? `?manage=${encodeURIComponent(manage)}` : '';
+                const data = await api.get(`/public/expenses/${hash}${q}`);
                 this.expense = data.expense;
             } catch (err) {
-                this.error = err.data?.message || 'Despesa nao encontrada.';
+                this.error = err.data?.message || 'Erro ao carregar.';
+                throw err;
             } finally {
                 this.loading = false;
             }
         },
 
-        async identifyMember(hash, name) {
+        async fetchParticipantBundle(expenseHash, participantHash) {
             this.loading = true;
             this.error = null;
             try {
-                const data = await api.post(`/public/expenses/${hash}/identify`, { name });
+                const data = await api.get(`/public/expenses/${expenseHash}/participants/${participantHash}`);
+                this.participantBundle = data;
+                this.expense = data.expense;
+            } catch (err) {
+                this.error = err.data?.message || 'Erro ao carregar.';
+                throw err;
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async identifyMember(hash, { name, phone }) {
+            this.loading = true;
+            this.error = null;
+            try {
+                const data = await api.post(`/public/expenses/${hash}/identify`, { name, phone });
                 this.members = data.members;
                 return data.members;
             } catch (err) {
-                this.error = err.data?.message || 'Membro nao encontrado.';
+                this.error = err.data?.message || 'Nao foi possivel identificar.';
                 throw err;
             } finally {
                 this.loading = false;
@@ -64,18 +90,25 @@ export const usePublicExpenseStore = defineStore('publicExpense', {
                 const data = await api.post(`/public/charges/${chargeId}/mark-as-paid`);
                 return data;
             } catch (err) {
-                this.error = err.data?.message || 'Falha ao marcar como pago.';
+                this.error = err.data?.message || 'Falha ao confirmar.';
                 throw err;
             } finally {
                 this.loading = false;
             }
         },
 
-        reset() {
-            this.expense = null;
-            this.members = null;
-            this.selectedMember = null;
-            this.error = null;
+        async validateCharge(chargeId, manageToken) {
+            return api.patch(`/public/charges/${chargeId}/validate`, { manage_token: manageToken });
+        },
+
+        async rejectCharge(chargeId, manageToken) {
+            return api.patch(`/public/charges/${chargeId}/reject`, { manage_token: manageToken });
+        },
+
+        async resendParticipantLink(expenseHash, memberId, manageToken) {
+            return api.post(`/public/expenses/${expenseHash}/participants/${memberId}/resend-link`, {
+                manage_token: manageToken,
+            });
         },
     },
 });

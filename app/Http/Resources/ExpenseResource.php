@@ -9,6 +9,8 @@ class ExpenseResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $user = $request->user();
+
         return [
             'id' => $this->id,
             'description' => $this->description,
@@ -16,11 +18,18 @@ class ExpenseResource extends JsonResource
             'due_date' => $this->due_date,
             'amount_per_member' => $this->amount_per_member,
             'pix_key' => $this->pix_key,
+            'pix_qr_code' => $this->pix_qr_code,
             'status' => $this->status,
             'public_hash' => $this->public_hash,
             'public_url' => $this->public_hash ? $this->getPublicUrl() : null,
             'charges' => ChargeResource::collection($this->whenLoaded('charges')),
             'created_at' => $this->created_at,
+            'can_manage' => $user && $this->team
+                ? $this->team->members()
+                    ->where('user_id', $user->id)
+                    ->where('role', 'admin')
+                    ->exists()
+                : false,
         ];
     }
 }

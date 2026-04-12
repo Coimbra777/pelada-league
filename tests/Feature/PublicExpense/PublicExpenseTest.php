@@ -23,6 +23,7 @@ class PublicExpenseTest extends TestCase
 
         $member1 = TeamMember::create([
             'team_id' => $team->id,
+            'unique_hash' => 'participant-hash-aaa',
             'user_id' => $admin->id,
             'name' => 'Joao Admin',
             'phone' => '11000000001',
@@ -32,6 +33,7 @@ class PublicExpenseTest extends TestCase
 
         $member2 = TeamMember::create([
             'team_id' => $team->id,
+            'unique_hash' => 'participant-hash-bbb',
             'name' => 'Maria Silva',
             'phone' => '11000000002',
             'role' => 'member',
@@ -48,6 +50,7 @@ class PublicExpenseTest extends TestCase
             'pix_qr_code' => base64_encode('fake-qr'),
             'status' => 'open',
             'public_hash' => 'test-hash-123',
+            'manage_token' => 'manage-token-secret',
         ]);
 
         $charge1 = Charge::create([
@@ -96,6 +99,7 @@ class PublicExpenseTest extends TestCase
 
         $response = $this->postJson('/api/v1/public/expenses/test-hash-123/identify', [
             'name' => 'Maria',
+            'phone' => '11000000002',
         ]);
 
         $response->assertOk()
@@ -103,15 +107,47 @@ class PublicExpenseTest extends TestCase
             ->assertJsonPath('members.0.name', 'Maria Silva');
     }
 
-    public function test_identify_unknown_name_returns_404(): void
+    public function test_identify_member_by_phone(): void
     {
         $this->createExpenseWithCharges();
 
         $response = $this->postJson('/api/v1/public/expenses/test-hash-123/identify', [
-            'name' => 'Pedro',
+            'name' => 'Qualquer',
+            'phone' => '11000000002',
         ]);
 
-        $response->assertStatus(404);
+        $response->assertOk()
+            ->assertJsonCount(1, 'members')
+            ->assertJsonPath('members.0.name', 'Maria Silva');
+    }
+
+    public function test_identify_auto_creates_new_member(): void
+    {
+        [$expense] = $this->createExpenseWithCharges();
+
+        $response = $this->postJson('/api/v1/public/expenses/test-hash-123/identify', [
+            'name' => 'Pedro Novo',
+            'phone' => '11999888777',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'members')
+            ->assertJsonPath('members.0.name', 'Pedro Novo')
+            ->assertJsonPath('members.0.phone', '11999888777')
+            ->assertJsonPath('members.0.amount', '50.00')
+            ->assertJsonPath('members.0.status', 'pending');
+
+        $this->assertDatabaseHas('team_members', [
+            'team_id' => $expense->team_id,
+            'name' => 'Pedro Novo',
+            'phone' => '11999888777',
+        ]);
+
+        $this->assertDatabaseHas('charges', [
+            'expense_id' => $expense->id,
+            'amount' => 50.00,
+            'status' => 'pending',
+        ]);
     }
 
     public function test_upload_proof_creates_record(): void
@@ -211,10 +247,55 @@ class PublicExpenseTest extends TestCase
         $this->postJson("/api/v1/public/charges/{$charge2->id}/upload-proof", ['file' => $file]);
         $this->postJson("/api/v1/public/charges/{$charge2->id}/mark-as-paid");
 
-        // Try again
+        // Try again (ja em proof_sent)
         $response = $this->postJson("/api/v1/public/charges/{$charge2->id}/mark-as-paid");
 
         $response->assertStatus(422)
-            ->assertJsonPath('message', 'Charge already processed.');
+            ->assertJsonPath('message', 'Aguardando aprovacao do responsavel.');
+    }
+
+    public function test_second_proof_upload_is_rejected(): void
+    {
+        Storage::fake('local');
+
+        [, , $charge2] = $this->createExpenseWithCharges();
+
+        $file = UploadedFile::fake()->create('comprovante.jpg', 100, 'image/jpeg');
+        $this->postJson("/api/v1/public/charges/{$charge2->id}/upload-proof", ['file' => $file]);
+
+        $file2 = UploadedFile::fake()->create('comprovante2.jpg', 100, 'image/jpeg');
+        $response = $this->postJson("/api/v1/public/charges/{$charge2->id}/upload-proof", ['file' => $file2]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('message', 'Comprovante ja enviado.');
+    }
+
+    public function test_participant_show_resolves_member(): void
+    {
+        [, , $charge2] = $this->createExpenseWithCharges();
+
+        $response = $this->getJson('/api/v1/public/expenses/test-hash-123/participants/participant-hash-bbb');
+
+        $response->assertOk()
+            ->assertJsonPath('participant.name', 'Maria Silva')
+            ->assertJsonPath('charge.amount', '50.00');
+    }
+
+    public function test_public_validate_charge_with_manage_token(): void
+    {
+        Storage::fake('local');
+
+        [, , $charge2] = $this->createExpenseWithCharges();
+
+        $file = UploadedFile::fake()->create('comprovante.jpg', 100, 'image/jpeg');
+        $this->postJson("/api/v1/public/charges/{$charge2->id}/upload-proof", ['file' => $file]);
+        $this->postJson("/api/v1/public/charges/{$charge2->id}/mark-as-paid");
+
+        $response = $this->patchJson("/api/v1/public/charges/{$charge2->id}/validate", [
+            'manage_token' => 'manage-token-secret',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('charge.status', 'validated');
     }
 }

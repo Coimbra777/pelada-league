@@ -24,6 +24,7 @@ class PaymentValidationTest extends TestCase
 
         TeamMember::create([
             'team_id' => $team->id,
+            'unique_hash' => 'val-participant-admin',
             'user_id' => $admin->id,
             'name' => $admin->name,
             'phone' => '11000000001',
@@ -33,6 +34,7 @@ class PaymentValidationTest extends TestCase
 
         $member = TeamMember::create([
             'team_id' => $team->id,
+            'unique_hash' => 'val-participant-maria',
             'name' => 'Maria',
             'phone' => '11000000002',
             'role' => 'member',
@@ -48,6 +50,7 @@ class PaymentValidationTest extends TestCase
             'pix_key' => '11999999999',
             'status' => 'open',
             'public_hash' => 'val-hash-123',
+            'manage_token' => 'val-manage-token',
         ]);
 
         $charge1 = Charge::create([

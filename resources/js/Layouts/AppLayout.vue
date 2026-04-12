@@ -9,11 +9,7 @@ const mobileMenuOpen = ref(false);
 const page = usePage();
 
 onMounted(async () => {
-    if (!authStore.isAuthenticated) {
-        router.visit('/login');
-        return;
-    }
-    if (!authStore.user) {
+    if (authStore.isAuthenticated && !authStore.user) {
         await authStore.fetchUser();
     }
 });
@@ -27,10 +23,7 @@ function isActive(path) {
     return page.url.startsWith(path);
 }
 
-const navLinks = [
-    { href: '/dashboard', label: 'Dashboard' },
-    { href: '/teams', label: 'Equipes' },
-];
+const navLinks = [{ href: '/dashboard', label: 'Inicio' }];
 </script>
 
 <template>

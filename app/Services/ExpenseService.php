@@ -36,6 +36,7 @@ class ExpenseService
             'pix_qr_code' => $data['pix_qr_code'] ?? null,
             'status' => 'open',
             'public_hash' => (string) Str::uuid(),
+            'manage_token' => (string) Str::uuid(),
         ]);
 
         foreach ($members as $index => $member) {

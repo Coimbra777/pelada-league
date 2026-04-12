@@ -11,8 +11,12 @@ class PaymentProofService
 {
     public function uploadProof(Charge $charge, UploadedFile $file): PaymentProof
     {
-        if (!in_array($charge->status, ['pending', 'rejected'])) {
+        if (! in_array($charge->status, ['pending', 'rejected'], true)) {
             throw new \DomainException('Cannot upload proof for this charge status.');
+        }
+
+        if ($charge->paymentProofs()->exists() && $charge->status !== 'rejected') {
+            throw new \DomainException('Comprovante ja enviado.');
         }
 
         $path = $file->store("payment-proofs/{$charge->id}", 'local');

@@ -30,9 +30,11 @@ async function request(method, endpoint, body = null) {
 
     const response = await fetch(`${API_BASE}${endpoint}`, options);
 
-    if (response.status === 401 && endpoint !== '/auth/login' && endpoint !== '/auth/register') {
-        clearToken();
-        window.location.href = '/login';
+    if (response.status === 401) {
+        const isPublicEndpoint = endpoint.startsWith('/public/');
+        if (!isPublicEndpoint && endpoint !== '/auth/login' && endpoint !== '/auth/register') {
+            clearToken();
+        }
         throw { status: 401, data: { message: 'Unauthorized' } };
     }
 
@@ -68,10 +70,43 @@ async function upload(endpoint, file, fieldName = 'file') {
         body: formData,
     });
 
-    if (response.status === 401 && endpoint !== '/auth/login') {
-        clearToken();
-        window.location.href = '/login';
+    if (response.status === 401) {
+        const isPublicEndpoint = endpoint.startsWith('/public/');
+        if (!isPublicEndpoint && endpoint !== '/auth/login') {
+            clearToken();
+        }
         throw { status: 401, data: { message: 'Unauthorized' } };
+    }
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw { status: response.status, data };
+    }
+
+    return data;
+}
+
+async function requestAbsolute(method, url, body = null) {
+    const headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+    };
+
+    const token = getToken();
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const options = { method, headers };
+    if (body && method !== 'GET') {
+        options.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(url, options);
+
+    if (response.status === 204) {
+        return null;
     }
 
     const data = await response.json();
@@ -90,6 +125,7 @@ export const api = {
     patch: (url, body) => request('PATCH', url, body),
     delete: (url) => request('DELETE', url),
     upload: (url, file, fieldName) => upload(url, file, fieldName),
+    createPublicExpense: (body) => requestAbsolute('POST', '/api/public/expenses', body),
 };
 
 export { getToken, setToken, clearToken };

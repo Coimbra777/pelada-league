@@ -1,65 +1,100 @@
 <script setup>
-import { onMounted } from 'vue';
+import { onMounted, computed, ref } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
 import { useAuthStore } from '../Stores/auth.js';
 import { useTeamStore } from '../Stores/teams.js';
+import { useExpenseStore } from '../Stores/expenses.js';
+import { useToast } from '../Composables/useToast.js';
 import AppLayout from '../Layouts/AppLayout.vue';
 import Card from '../Components/Card.vue';
 import Button from '../Components/Button.vue';
+import StatusBadge from '../Components/StatusBadge.vue';
 import LoadingSpinner from '../Components/LoadingSpinner.vue';
 
 defineOptions({ layout: AppLayout });
 
 const authStore = useAuthStore();
 const teamStore = useTeamStore();
+const expenseStore = useExpenseStore();
+const toast = useToast();
 
-onMounted(() => {
-    teamStore.fetchTeams();
+const firstTeam = computed(() => teamStore.teams[0] ?? null);
+const setupFailed = ref(false);
+const bootstrapping = ref(true);
+
+async function bootstrap() {
+    setupFailed.value = false;
+    await teamStore.fetchTeams();
+    if (!teamStore.teams.length) {
+        try {
+            await teamStore.createTeam('Meu grupo');
+            await teamStore.fetchTeams();
+        } catch {
+            setupFailed.value = true;
+            toast.error('Nao foi possivel criar seu grupo. Tente novamente.');
+            return;
+        }
+    }
+    if (firstTeam.value) {
+        await expenseStore.fetchExpenses(firstTeam.value.id);
+    }
+}
+
+onMounted(async () => {
+    await bootstrap();
+    bootstrapping.value = false;
 });
+
+async function retrySetup() {
+    bootstrapping.value = true;
+    await bootstrap();
+    bootstrapping.value = false;
+}
+
+function formatCurrency(value) {
+    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
 </script>
 
 <template>
-    <Head title="Dashboard" />
-    <div>
-        <div class="flex items-center justify-between mb-6">
-            <div>
-                <h1 class="text-2xl font-bold text-gray-900">Dashboard</h1>
-                <p class="text-gray-500 text-sm mt-1">Ola, {{ authStore.userName }}!</p>
+    <Head title="Inicio" />
+    <div class="max-w-lg mx-auto">
+        <p class="text-gray-500 text-sm mb-6">Ola, {{ authStore.userName }}!</p>
+
+        <LoadingSpinner v-if="bootstrapping || teamStore.loading" />
+
+        <div v-else-if="setupFailed || !firstTeam" class="text-center py-10 space-y-4">
+            <p class="text-gray-600 text-sm">Nao foi possivel preparar seu grupo.</p>
+            <Button class="w-full min-h-[48px]" size="lg" @click="retrySetup">Tentar de novo</Button>
+        </div>
+
+        <template v-else>
+            <Link :href="`/teams/${firstTeam.id}/expenses/create`">
+                <Button size="lg" class="w-full min-h-[52px] mb-6">+ Criar despesa</Button>
+            </Link>
+
+            <div v-if="expenseStore.expenses.length > 0">
+                <h3 class="text-sm font-medium text-gray-500 mb-3">Despesas recentes</h3>
+                <div class="space-y-3">
+                    <Link
+                        v-for="expense in expenseStore.expenses.slice(0, 10)"
+                        :key="expense.id"
+                        :href="`/teams/${firstTeam.id}/expenses/${expense.id}`"
+                        class="block"
+                    >
+                        <Card class="hover:shadow-md transition-shadow">
+                            <div class="flex items-center justify-between gap-3">
+                                <div class="min-w-0">
+                                    <p class="font-medium text-gray-900 truncate">{{ expense.description }}</p>
+                                    <p class="text-sm text-gray-500 mt-0.5">{{ formatCurrency(expense.total_amount) }}</p>
+                                </div>
+                                <StatusBadge :status="expense.status" />
+                            </div>
+                        </Card>
+                    </Link>
+                </div>
             </div>
-            <Link href="/teams/create">
-                <Button>Nova Equipe</Button>
-            </Link>
-        </div>
-
-        <LoadingSpinner v-if="teamStore.loading" />
-
-        <div v-else-if="teamStore.teams.length === 0" class="text-center py-16">
-            <div class="text-gray-400 mb-4">
-                <svg class="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-            </div>
-            <h3 class="text-lg font-medium text-gray-900 mb-1">Nenhuma equipe ainda</h3>
-            <p class="text-gray-500 mb-4">Crie sua primeira equipe para comecar a dividir despesas.</p>
-            <Link href="/teams/create">
-                <Button>Criar Equipe</Button>
-            </Link>
-        </div>
-
-        <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <Link v-for="team in teamStore.teams" :key="team.id" :href="`/teams/${team.id}`" class="block">
-                <Card class="hover:shadow-md transition-shadow cursor-pointer">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <h3 class="font-semibold text-gray-900">{{ team.name }}</h3>
-                            <p class="text-sm text-gray-500 mt-1">{{ team.members_count }} membro(s)</p>
-                        </div>
-                        <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                        </svg>
-                    </div>
-                </Card>
-            </Link>
-        </div>
+        </template>
     </div>
 </template>
+

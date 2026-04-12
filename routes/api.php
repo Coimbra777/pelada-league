@@ -10,6 +10,8 @@ use App\Http\Controllers\Api\V1\TeamMemberController;
 use App\Http\Controllers\Api\V1\WebhookController;
 use Illuminate\Support\Facades\Route;
 
+Route::post('/public/expenses', [PublicExpenseController::class, 'store']);
+
 Route::prefix('v1')->group(function () {
 
     Route::prefix('auth')->group(function () {
@@ -22,23 +24,25 @@ Route::prefix('v1')->group(function () {
         });
     });
 
-    // Public routes (no auth)
     Route::prefix('public')->group(function () {
         Route::get('/expenses/{hash}', [PublicExpenseController::class, 'show']);
+        Route::get('/expenses/{hash}/participants/{participantHash}', [PublicExpenseController::class, 'showParticipant']);
         Route::post('/expenses/{hash}/identify', [PublicExpenseController::class, 'identify']);
         Route::post('/charges/{charge}/upload-proof', [PublicExpenseController::class, 'uploadProof']);
         Route::post('/charges/{charge}/mark-as-paid', [PublicExpenseController::class, 'markAsPaid']);
+        Route::patch('/charges/{charge}/validate', [PublicExpenseController::class, 'validateCharge']);
+        Route::patch('/charges/{charge}/reject', [PublicExpenseController::class, 'rejectCharge']);
+        Route::get('/charges/{charge}/proof', [PublicExpenseController::class, 'downloadProof']);
+        Route::post('/expenses/{hash}/participants/{member}/resend-link', [PublicExpenseController::class, 'resendParticipantLink']);
     });
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('/charges', [ChargeController::class, 'store']);
         Route::post('/charges/{charge}/sync', [ChargeController::class, 'sync']);
 
-        // Expense direct access
         Route::get('/expenses/{expense}', [ExpenseController::class, 'showDirect']);
         Route::get('/expenses/{expense}/members', [ExpenseController::class, 'members']);
 
-        // Charge validation
         Route::patch('/charges/{charge}/validate', [ChargeValidationController::class, 'validateCharge']);
         Route::patch('/charges/{charge}/reject', [ChargeValidationController::class, 'reject']);
         Route::get('/charges/{charge}/proof', [ChargeValidationController::class, 'downloadProof']);

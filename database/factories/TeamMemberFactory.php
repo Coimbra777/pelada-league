@@ -6,6 +6,7 @@ use App\Models\Team;
 use App\Models\TeamMember;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Str;
 
 /**
  * @extends Factory<TeamMember>
@@ -18,6 +19,7 @@ class TeamMemberFactory extends Factory
     {
         return [
             'team_id' => Team::factory(),
+            'unique_hash' => (string) Str::uuid(),
             'name' => fake()->name(),
             'phone' => fake()->unique()->numerify('119########'),
             'email' => fake()->unique()->safeEmail(),

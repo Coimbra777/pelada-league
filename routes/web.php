@@ -4,8 +4,8 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 Route::get('/', function () {
-    return redirect('/login');
-});
+    return Inertia::render('Home');
+})->name('home');
 
 Route::get('/login', function () {
     return Inertia::render('Auth/Login');
@@ -39,10 +39,20 @@ Route::get('/teams/{team}/expenses/{expense}', function (string $team, string $e
     return Inertia::render('Expenses/Show', ['teamId' => $team, 'id' => $expense]);
 })->name('expenses.show');
 
-Route::get('/charges/{charge}', function (string $charge) {
-    return Inertia::render('Charges/Show', ['id' => $charge]);
-})->name('charges.show');
+Route::get('/public/expenses/{hash}', function (string $hash) {
+    return Inertia::render('Public/ExpenseDashboard', [
+        'hash' => $hash,
+        'manage' => request()->query('manage'),
+    ]);
+})->name('public.expense');
+
+Route::get('/p/{expenseHash}/{participantHash}', function (string $expenseHash, string $participantHash) {
+    return Inertia::render('Public/Participant', [
+        'expenseHash' => $expenseHash,
+        'participantHash' => $participantHash,
+    ]);
+})->name('public.participant');
 
 Route::get('/p/{hash}', function (string $hash) {
-    return Inertia::render('Public/Expense', ['hash' => $hash]);
-})->name('public.expense');
+    return redirect()->route('public.expense', ['hash' => $hash], 301);
+})->name('public.expense.legacy');

@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
 class Expense extends Model
 {
@@ -14,6 +15,8 @@ class Expense extends Model
     protected $fillable = [
         'team_id',
         'created_by',
+        'owner_name',
+        'owner_phone',
         'description',
         'total_amount',
         'amount_per_member',
@@ -22,7 +25,24 @@ class Expense extends Model
         'pix_qr_code',
         'status',
         'public_hash',
+        'manage_token',
     ];
+
+    protected $hidden = [
+        'manage_token',
+    ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (Expense $expense) {
+            if (empty($expense->public_hash)) {
+                $expense->public_hash = (string) Str::uuid();
+            }
+            if (empty($expense->manage_token)) {
+                $expense->manage_token = (string) Str::uuid();
+            }
+        });
+    }
 
     protected function casts(): array
     {
@@ -35,7 +55,7 @@ class Expense extends Model
 
     public function getPublicUrl(): string
     {
-        return config('app.url') . '/p/' . $this->public_hash;
+        return rtrim((string) config('app.url'), '/') . '/public/expenses/' . $this->public_hash;
     }
 
     public function scopeByHash($query, string $hash)

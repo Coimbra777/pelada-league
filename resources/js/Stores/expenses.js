@@ -51,22 +51,6 @@ export const useExpenseStore = defineStore('expenses', {
             }
         },
 
-        async syncCharge(chargeId) {
-            try {
-                const data = await api.post(`/charges/${chargeId}/sync`);
-                if (this.currentExpense?.charges) {
-                    const idx = this.currentExpense.charges.findIndex(c => c.id === chargeId);
-                    if (idx !== -1) {
-                        this.currentExpense.charges[idx] = data.charge;
-                    }
-                }
-                return data.charge;
-            } catch (err) {
-                this.error = err.data?.message || 'Falha ao sincronizar.';
-                throw err;
-            }
-        },
-
         async validateCharge(chargeId) {
             try {
                 const data = await api.patch(`/charges/${chargeId}/validate`);
@@ -89,16 +73,6 @@ export const useExpenseStore = defineStore('expenses', {
             }
         },
 
-        async fetchExpenseMembers(expenseId) {
-            try {
-                const data = await api.get(`/expenses/${expenseId}/members`);
-                return data.members;
-            } catch (err) {
-                this.error = err.data?.message || 'Falha ao carregar membros.';
-                throw err;
-            }
-        },
-
         _updateCharge(chargeId, updatedCharge) {
             if (this.currentExpense?.charges) {
                 const idx = this.currentExpense.charges.findIndex(c => c.id === chargeId);
@@ -108,10 +82,14 @@ export const useExpenseStore = defineStore('expenses', {
             }
         },
 
-        getChargeById(chargeId) {
-            return this.currentExpense?.charges?.find(
-                c => c.id === Number(chargeId)
-            ) || null;
+        async downloadProofUrl(chargeId) {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`/api/v1/charges/${chargeId}/proof`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error('Falha ao baixar comprovante.');
+            const blob = await res.blob();
+            return { url: URL.createObjectURL(blob), type: blob.type };
         },
     },
 });

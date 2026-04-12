@@ -1,12 +1,17 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
 import { useExpenseStore } from '../../Stores/expenses.js';
 import { useToast } from '../../Composables/useToast.js';
+import { useClipboard } from '../../Composables/useClipboard.js';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import Card from '../../Components/Card.vue';
-import StatusBadge from '../../Components/StatusBadge.vue';
 import LoadingSpinner from '../../Components/LoadingSpinner.vue';
+import ExpenseHeader from '../../Components/ExpenseHeader.vue';
+import PixCard from '../../Components/PixCard.vue';
+import MemberList from '../../Components/MemberList.vue';
+import WhatsAppShareButton from '../../Components/WhatsAppShareButton.vue';
+import ProofViewerModal from '../../Components/ProofViewerModal.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -17,39 +22,52 @@ const props = defineProps({
 
 const expenseStore = useExpenseStore();
 const toast = useToast();
-const copied = ref(false);
+const { copy } = useClipboard();
+
+const proofModalOpen = ref(false);
+const proofChargeId = ref(null);
 
 onMounted(() => {
     expenseStore.fetchExpense(props.teamId, props.id);
 });
 
-function formatCurrency(value) {
-    return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
+const expense = computed(() => expenseStore.currentExpense);
 
-function publicUrl() {
-    const hash = expenseStore.currentExpense?.public_hash;
-    if (!hash) return null;
-    return `${window.location.origin}/p/${hash}`;
-}
+const membersForList = computed(() => {
+    const charges = expense.value?.charges;
+    if (!charges?.length) return [];
+    return charges.map((c) => ({
+        charge_id: c.id,
+        name: c.member?.name ?? 'Participante',
+        phone: c.member?.phone,
+        amount: c.amount,
+        charge_status: c.status,
+    }));
+});
 
-async function copyPublicLink() {
-    const url = publicUrl();
-    if (!url) return;
-    try {
-        await navigator.clipboard.writeText(url);
-        copied.value = true;
-        setTimeout(() => { copied.value = false; }, 2000);
-    } catch {
-        toast.error('Falha ao copiar link.');
-    }
+const headerExpense = computed(() => {
+    const e = expense.value;
+    if (!e) return null;
+    return {
+        ...e,
+        members: membersForList.value,
+    };
+});
+
+const publicLink = computed(() => expense.value?.public_url ?? null);
+
+const isAdmin = computed(() => expense.value?.can_manage === true);
+
+async function copyLink() {
+    if (!publicLink.value) return;
+    await copy(publicLink.value);
 }
 
 async function validateCharge(chargeId) {
     try {
         await expenseStore.validateCharge(chargeId);
-        toast.success('Comprovante validado!');
-        expenseStore.fetchExpense(props.teamId, props.id);
+        toast.success('Pagamento validado!');
+        await expenseStore.fetchExpense(props.teamId, props.id);
     } catch {
         toast.error('Falha ao validar.');
     }
@@ -59,111 +77,64 @@ async function rejectCharge(chargeId) {
     try {
         await expenseStore.rejectCharge(chargeId);
         toast.success('Comprovante rejeitado.');
-        expenseStore.fetchExpense(props.teamId, props.id);
+        await expenseStore.fetchExpense(props.teamId, props.id);
     } catch {
         toast.error('Falha ao rejeitar.');
     }
 }
 
-function downloadProof(chargeId) {
-    const token = localStorage.getItem('token');
-    fetch(`/api/v1/charges/${chargeId}/proof`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-    })
-        .then(res => res.blob())
-        .then(blob => {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'comprovante';
-            a.click();
-            URL.revokeObjectURL(url);
-        })
-        .catch(() => toast.error('Falha ao baixar comprovante.'));
+function openProof(chargeId) {
+    proofChargeId.value = chargeId;
+    proofModalOpen.value = true;
+}
+
+function closeProof() {
+    proofModalOpen.value = false;
+    proofChargeId.value = null;
 }
 </script>
 
 <template>
     <Head title="Despesa" />
-    <div>
-        <Link :href="`/teams/${props.teamId}`" class="text-sm text-indigo-600 hover:text-indigo-800 mb-4 inline-block">
-            &larr; Voltar para equipe
+    <div class="max-w-lg mx-auto pb-8">
+        <Link href="/dashboard" class="text-sm text-indigo-600 hover:text-indigo-800 mb-4 inline-block min-h-[44px] inline-flex items-center">
+            &larr; Inicio
         </Link>
 
-        <LoadingSpinner v-if="expenseStore.loading && !expenseStore.currentExpense" />
+        <LoadingSpinner v-if="expenseStore.loading && !expense" />
 
-        <template v-else-if="expenseStore.currentExpense">
-            <!-- Public link banner -->
-            <div v-if="publicUrl()" class="mb-4 flex items-center gap-2 bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3">
-                <span class="text-sm text-indigo-700 flex-1 truncate">{{ publicUrl() }}</span>
+        <template v-else-if="expense && headerExpense">
+            <Card class="mb-4">
+                <ExpenseHeader :expense="headerExpense" />
+            </Card>
+
+            <div v-if="publicLink" class="space-y-3 mb-4">
+                <PixCard :pix-key="expense.pix_key" :pix-qr-code="expense.pix_qr_code || null" />
                 <button
-                    @click="copyPublicLink"
-                    class="text-xs font-medium text-indigo-600 hover:text-indigo-800 whitespace-nowrap"
+                    type="button"
+                    class="w-full min-h-[48px] rounded-xl border border-gray-300 bg-white px-4 text-sm font-medium text-gray-800 shadow-sm active:bg-gray-50"
+                    @click="copyLink"
                 >
-                    {{ copied ? 'Copiado!' : 'Copiar link' }}
+                    Copiar link publico
                 </button>
+                <WhatsAppShareButton
+                    :description="expense.description"
+                    :amount="expense.total_amount"
+                    :public-url="publicLink"
+                />
             </div>
 
-            <Card class="mb-6">
-                <div class="flex items-center justify-between mb-4">
-                    <div>
-                        <h1 class="text-xl font-bold text-gray-900">{{ expenseStore.currentExpense.description }}</h1>
-                        <p class="text-sm text-gray-500 mt-1">Vencimento: {{ expenseStore.currentExpense.due_date }}</p>
-                        <p v-if="expenseStore.currentExpense.pix_key" class="text-sm text-gray-500 mt-1">
-                            PIX: {{ expenseStore.currentExpense.pix_key }}
-                        </p>
-                    </div>
-                    <div class="text-right">
-                        <p class="text-2xl font-bold text-gray-900">{{ formatCurrency(expenseStore.currentExpense.total_amount) }}</p>
-                        <p v-if="expenseStore.currentExpense.amount_per_member" class="text-sm text-gray-500">
-                            {{ formatCurrency(expenseStore.currentExpense.amount_per_member) }} / membro
-                        </p>
-                        <StatusBadge :status="expenseStore.currentExpense.status" />
-                    </div>
-                </div>
-            </Card>
-
-            <Card title="Cobrancas por Membro">
-                <div class="divide-y divide-gray-100">
-                    <div
-                        v-for="charge in expenseStore.currentExpense.charges"
-                        :key="charge.id"
-                        class="py-3 flex items-center justify-between"
-                    >
-                        <div class="flex-1">
-                            <p class="text-sm font-medium text-gray-900">{{ charge.member?.name || 'Membro' }}</p>
-                            <p class="text-xs text-gray-500">{{ charge.member?.phone }}</p>
-                        </div>
-                        <div class="flex items-center gap-3">
-                            <p class="text-sm font-semibold text-gray-900">{{ formatCurrency(charge.amount) }}</p>
-                            <StatusBadge :status="charge.status" />
-                            <div class="flex gap-2">
-                                <template v-if="charge.status === 'proof_sent'">
-                                    <button @click="downloadProof(charge.id)" class="text-xs text-indigo-600 hover:text-indigo-800">
-                                        Ver Comprovante
-                                    </button>
-                                    <button @click="validateCharge(charge.id)" class="text-xs text-green-600 hover:text-green-800 font-medium">
-                                        Validar
-                                    </button>
-                                    <button @click="rejectCharge(charge.id)" class="text-xs text-red-600 hover:text-red-800 font-medium">
-                                        Rejeitar
-                                    </button>
-                                </template>
-                                <template v-else-if="charge.status === 'validated' || charge.status === 'rejected'">
-                                    <button @click="downloadProof(charge.id)" class="text-xs text-indigo-600 hover:text-indigo-800">
-                                        Ver Comprovante
-                                    </button>
-                                </template>
-                                <template v-else-if="charge.pix_copy_paste">
-                                    <Link :href="`/charges/${charge.id}`" class="text-xs text-indigo-600 hover:text-indigo-800">
-                                        Ver PIX
-                                    </Link>
-                                </template>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <Card title="Participantes">
+                <MemberList
+                    :members="membersForList"
+                    :is-admin="isAdmin"
+                    @validate="validateCharge"
+                    @reject="rejectCharge"
+                    @view-proof="openProof"
+                />
             </Card>
         </template>
+
+        <ProofViewerModal :show="proofModalOpen" :charge-id="proofChargeId" @close="closeProof" />
     </div>
 </template>
