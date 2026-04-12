@@ -9,6 +9,14 @@ import ToastContainer from '../Components/ToastContainer.vue';
             <div class="text-center mb-6">
                 <Link href="/" class="text-2xl font-bold text-indigo-600">Caixinha</Link>
                 <p class="mt-1 text-sm text-gray-500">Pagamento de despesa compartilhada</p>
+                <div class="mt-4">
+                    <Link
+                        href="/minhas-despesas"
+                        class="inline-flex min-h-[44px] items-center justify-center rounded-lg border border-indigo-200 bg-white px-4 text-sm font-medium text-indigo-700 shadow-sm hover:bg-indigo-50"
+                    >
+                        Minhas despesas
+                    </Link>
+                </div>
             </div>
             <slot />
         </div>

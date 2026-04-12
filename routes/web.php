@@ -7,6 +7,10 @@ Route::get('/', function () {
     return Inertia::render('Home');
 })->name('home');
 
+Route::get('/minhas-despesas', function () {
+    return Inertia::render('MyExpenses');
+})->name('my-expenses');
+
 Route::get('/login', function () {
     return Inertia::render('Auth/Login');
 })->name('login');

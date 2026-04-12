@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { Head, Link } from '@inertiajs/vue3';
+import { Head, Link, router } from '@inertiajs/vue3';
 import { usePublicExpenseStore } from '../../Stores/publicExpense.js';
 import { useToast } from '../../Composables/useToast.js';
 import { useClipboard } from '../../Composables/useClipboard.js';
@@ -12,6 +12,7 @@ import PixCard from '../../Components/PixCard.vue';
 import MemberList from '../../Components/MemberList.vue';
 import WhatsAppShareButton from '../../Components/WhatsAppShareButton.vue';
 import ProofViewerModal from '../../Components/ProofViewerModal.vue';
+import { getByHash, saveExpense } from '../../Services/localExpenses.js';
 
 defineOptions({ layout: PublicLayout });
 
@@ -38,10 +39,35 @@ const publicLink = computed(() => {
     return `${window.location.origin}/public/expenses/${store.expense.public_hash}`;
 });
 
+const adminLink = computed(() => {
+    if (!store.expense?.public_hash || !props.manage) return null;
+    return `${window.location.origin}/public/expenses/${store.expense.public_hash}?manage=${encodeURIComponent(props.manage)}`;
+});
+
 onMounted(async () => {
+    if (!props.manage) {
+        const stored = getByHash(props.hash);
+        if (stored?.manage_token) {
+            router.replace(
+                `/public/expenses/${props.hash}?manage=${encodeURIComponent(stored.manage_token)}`,
+            );
+            return;
+        }
+    }
+
     store.reset();
     try {
         await store.fetchExpense(props.hash, props.manage || null);
+        if (store.expense?.can_manage && props.manage) {
+            const existing = getByHash(props.hash);
+            saveExpense({
+                hash: store.expense.public_hash,
+                manage_token: props.manage,
+                description: store.expense.description,
+                amount: Number(store.expense.total_amount),
+                created_at: existing?.created_at || new Date().toISOString(),
+            });
+        }
     } catch {
         /* store.error */
     }
@@ -50,6 +76,11 @@ onMounted(async () => {
 async function copyPublicLink() {
     if (!publicLink.value) return;
     await copy(publicLink.value);
+}
+
+async function copyAdminLink() {
+    if (!adminLink.value) return;
+    await copy(adminLink.value);
 }
 
 async function validateCharge(chargeId) {
@@ -106,7 +137,35 @@ async function resendMember(memberId) {
         <LoadingSpinner v-if="store.loading && !store.expense" />
 
         <template v-else-if="store.expense && headerExpense">
-            <p v-if="!store.expense.can_manage && !manage" class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+            <div
+                v-if="store.expense.can_manage && manage"
+                class="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 space-y-3"
+            >
+                <p class="text-sm font-semibold text-amber-900">
+                    Guarde este link para gerenciar sua despesa
+                </p>
+                <p class="text-xs text-amber-900/90">
+                    Este link da controle total da despesa. Nao compartilhe com participantes — apenas com quem for co-administrar.
+                </p>
+                <div class="flex flex-col gap-2">
+                    <button
+                        type="button"
+                        class="w-full min-h-[48px] rounded-lg bg-amber-100 border border-amber-200 px-4 text-sm font-medium text-amber-950 active:bg-amber-200"
+                        @click="copyAdminLink"
+                    >
+                        Copiar link do administrador
+                    </button>
+                    <button
+                        type="button"
+                        class="w-full min-h-[48px] rounded-lg bg-white border border-amber-200 px-4 text-sm font-medium text-amber-950"
+                        @click="copyPublicLink"
+                    >
+                        Copiar link para participantes (grupo)
+                    </button>
+                </div>
+            </div>
+
+            <p v-else-if="!store.expense.can_manage && !manage" class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
                 Guarde o link com <strong>?manage=...</strong> para validar pagamentos. Sem ele, esta tela e apenas informativa.
             </p>
 
