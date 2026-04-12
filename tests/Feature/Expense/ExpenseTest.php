@@ -220,4 +220,97 @@ class ExpenseTest extends TestCase
         $response->assertStatus(422)
             ->assertJsonValidationErrors('pix_key');
     }
+
+    public function test_admin_can_patch_expense(): void
+    {
+        [$team, $admin] = $this->createTeamWithMembers(2);
+
+        $create = $this->actingAs($admin, 'sanctum')
+            ->postJson("/api/v1/teams/{$team->id}/expenses", $this->expensePayload());
+
+        $expenseId = $create->json('expense.id');
+        $newDue = now()->addDays(10)->format('Y-m-d');
+
+        $patch = $this->actingAs($admin, 'sanctum')
+            ->patchJson("/api/v1/teams/{$team->id}/expenses/{$expenseId}", [
+                'description' => 'Atualizado',
+                'total_amount' => 120.00,
+                'due_date' => $newDue,
+                'pix_key' => 'meu@pix.com',
+            ]);
+
+        $patch->assertOk()
+            ->assertJsonPath('expense.description', 'Atualizado')
+            ->assertJsonPath('expense.total_amount', '120.00');
+
+        $this->assertDatabaseHas('expenses', [
+            'id' => $expenseId,
+            'description' => 'Atualizado',
+            'pix_key' => 'meu@pix.com',
+        ]);
+    }
+
+    public function test_admin_can_add_participants_when_all_charges_pending(): void
+    {
+        [$team, $admin] = $this->createTeamWithMembers(2);
+
+        $create = $this->actingAs($admin, 'sanctum')
+            ->postJson("/api/v1/teams/{$team->id}/expenses", $this->expensePayload([
+                'total_amount' => 90.00,
+            ]));
+
+        $expenseId = $create->json('expense.id');
+
+        $add = $this->actingAs($admin, 'sanctum')
+            ->postJson("/api/v1/teams/{$team->id}/expenses/{$expenseId}/participants", [
+                'participants' => [
+                    ['name' => 'Novo Membro', 'phone' => '11888887777'],
+                ],
+            ]);
+
+        $add->assertOk();
+        $this->assertDatabaseCount('charges', 3);
+
+        $charges = \App\Models\Charge::where('expense_id', $expenseId)->orderBy('id')->get();
+        $total = $charges->sum(fn ($c) => (float) $c->amount);
+        $this->assertEquals(90.00, $total);
+    }
+
+    public function test_non_admin_cannot_patch_expense(): void
+    {
+        $admin = User::factory()->create();
+        $member = User::factory()->create();
+
+        $team = Team::factory()->create(['owner_id' => $admin->id]);
+        TeamMember::create([
+            'team_id' => $team->id,
+            'user_id' => $admin->id,
+            'name' => $admin->name,
+            'phone' => '11000000001',
+            'email' => $admin->email,
+            'role' => 'admin',
+        ]);
+        TeamMember::create([
+            'team_id' => $team->id,
+            'user_id' => $member->id,
+            'name' => $member->name,
+            'phone' => '11000000002',
+            'email' => $member->email,
+            'role' => 'member',
+        ]);
+
+        $create = $this->actingAs($admin, 'sanctum')
+            ->postJson("/api/v1/teams/{$team->id}/expenses", $this->expensePayload());
+        $expenseId = $create->json('expense.id');
+
+        $patch = $this->actingAs($member, 'sanctum')
+            ->patchJson("/api/v1/teams/{$team->id}/expenses/{$expenseId}", [
+                'description' => 'Hack',
+                'total_amount' => 50.00,
+                'due_date' => now()->addDays(3)->format('Y-m-d'),
+                'pix_key' => '11999999999',
+            ]);
+
+        $patch->assertStatus(403);
+    }
 }

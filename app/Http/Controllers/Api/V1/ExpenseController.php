@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\AddTeamExpenseParticipantsRequest;
 use App\Http\Requests\Api\V1\StoreExpenseRequest;
+use App\Http\Requests\Api\V1\UpdateExpenseRequest;
 use App\Http\Resources\ChargeResource;
 use App\Http\Resources\ExpenseResource;
 use App\Models\Expense;
@@ -64,7 +66,37 @@ class ExpenseController extends Controller
             return response()->json(['message' => 'Not found.'], 404);
         }
 
-        $expense->load('charges.teamMember');
+        $expense->load('charges.teamMember', 'charges.paymentProofs');
+
+        return response()->json([
+            'expense' => new ExpenseResource($expense),
+        ]);
+    }
+
+    public function update(UpdateExpenseRequest $request, Team $team, Expense $expense, ExpenseService $expenseService): JsonResponse
+    {
+        try {
+            $expense = $expenseService->updateExpense($expense, $request->validated());
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'expense' => new ExpenseResource($expense),
+        ]);
+    }
+
+    public function addParticipants(AddTeamExpenseParticipantsRequest $request, Team $team, Expense $expense, ExpenseService $expenseService): JsonResponse
+    {
+        try {
+            $expense = $expenseService->addParticipantsToExpense(
+                $team,
+                $expense,
+                $request->input('participants', [])
+            );
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
 
         return response()->json([
             'expense' => new ExpenseResource($expense),

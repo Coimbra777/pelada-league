@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive } from 'vue';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { useExpenseStore } from '../../Stores/expenses.js';
 import { useTeamStore } from '../../Stores/teams.js';
@@ -9,6 +9,7 @@ import AppLayout from '../../Layouts/AppLayout.vue';
 import Card from '../../Components/Card.vue';
 import Input from '../../Components/Input.vue';
 import Button from '../../Components/Button.vue';
+import ParticipantsInput from '../../Components/ParticipantsInput.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -29,38 +30,19 @@ const errors = ref({});
 
 const today = new Date().toISOString().split('T')[0];
 
-// Member import
-const memberImportText = ref('');
-const parsedMembers = computed(() => {
-    if (!memberImportText.value.trim()) return [];
-    return memberImportText.value
-        .split('\n')
-        .map(line => line.trim())
-        .filter(Boolean)
-        .map(line => {
-            const parts = line.split(/[-–]/).map(p => p.trim());
-            return {
-                name: parts[0] || '',
-                phone: parts[1] || '',
-            };
-        })
-        .filter(m => m.name);
-});
+const participants = ref([]);
 
 async function submit() {
     errors.value = {};
     try {
-        // Add new members first (ignore errors for already existing)
-        for (const member of parsedMembers.value) {
-            if (member.name && member.phone) {
-                try {
-                    await api.post(`/teams/${props.teamId}/members`, {
-                        name: member.name,
-                        phone: member.phone,
-                    });
-                } catch {
-                    // Member may already exist, continue
-                }
+        for (const member of participants.value) {
+            try {
+                await api.post(`/teams/${props.teamId}/members`, {
+                    name: member.name,
+                    phone: member.phone,
+                });
+            } catch {
+                // Member may already exist, continue
             }
         }
 
@@ -133,24 +115,12 @@ async function submit() {
                     />
                 </div>
 
-                <!-- Member import -->
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Importar participantes (opcional)</label>
-                    <textarea
-                        v-model="memberImportText"
-                        rows="3"
-                        placeholder="Nome - telefone (um por linha)&#10;Ex: Maria - 11999998888&#10;Joao - 11888887777"
-                        class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-0 focus:border-indigo-500 focus:ring-indigo-500 font-mono"
-                    />
-                    <div v-if="parsedMembers.length" class="mt-2 flex flex-wrap gap-1">
-                        <span
-                            v-for="(m, i) in parsedMembers"
-                            :key="i"
-                            class="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-700"
-                        >
-                            {{ m.name }}
-                        </span>
-                    </div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Participantes (opcional)</label>
+                    <p class="text-xs text-gray-500 mb-2">
+                        Novos contatos entram na equipe antes de dividir a despesa entre todos os membros.
+                    </p>
+                    <ParticipantsInput v-model="participants" :block-incomplete-rows="false" />
                 </div>
 
                 <p v-if="expenseStore.error" class="text-sm text-red-600">{{ expenseStore.error }}</p>

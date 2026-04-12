@@ -17,7 +17,7 @@ class CreatedPublicExpenseResource extends JsonResource
             'public_hash' => $this->public_hash,
             'manage_token' => $this->manage_token,
             'public_url' => $this->getPublicUrl(),
-            'manage_url' => $this->getPublicUrl().$manageQuery,
+            'manage_url' => $this->getManageUrl(),
             'manage_path' => '/public/expenses/'.$this->public_hash.$manageQuery,
         ];
     }

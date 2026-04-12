@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -43,10 +44,14 @@ Route::get('/teams/{team}/expenses/{expense}', function (string $team, string $e
     return Inertia::render('Expenses/Show', ['teamId' => $team, 'id' => $expense]);
 })->name('expenses.show');
 
-Route::get('/public/expenses/{hash}', function (string $hash) {
+Route::get('/public/expenses/{hash}', function (Request $request, string $hash) {
+    if (! $request->has('manage')) {
+        return redirect("/p/{$hash}", 302);
+    }
+
     return Inertia::render('Public/ExpenseDashboard', [
         'hash' => $hash,
-        'manage' => request()->query('manage'),
+        'manage' => $request->query('manage'),
     ]);
 })->name('public.expense');
 
@@ -55,8 +60,10 @@ Route::get('/p/{expenseHash}/{participantHash}', function (string $expenseHash, 
         'expenseHash' => $expenseHash,
         'participantHash' => $participantHash,
     ]);
-})->name('public.participant');
+})->name('public.participant.invite');
 
 Route::get('/p/{hash}', function (string $hash) {
-    return redirect()->route('public.expense', ['hash' => $hash], 301);
-})->name('public.expense.legacy');
+    return Inertia::render('Public/ParticipantEntry', [
+        'hash' => $hash,
+    ]);
+})->name('public.participant');

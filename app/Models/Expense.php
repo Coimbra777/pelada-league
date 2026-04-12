@@ -55,7 +55,14 @@ class Expense extends Model
 
     public function getPublicUrl(): string
     {
-        return rtrim((string) config('app.url'), '/') . '/public/expenses/' . $this->public_hash;
+        return rtrim((string) config('app.url'), '/').'/p/'.$this->public_hash;
+    }
+
+    public function getManageUrl(): string
+    {
+        return rtrim((string) config('app.url'), '/')
+            .'/public/expenses/'.$this->public_hash
+            .'?manage='.urlencode((string) $this->manage_token);
     }
 
     public function scopeByHash($query, string $hash)

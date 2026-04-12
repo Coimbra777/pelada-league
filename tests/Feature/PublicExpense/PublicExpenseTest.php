@@ -42,6 +42,8 @@ class PublicExpenseTest extends TestCase
         $expense = Expense::create([
             'team_id' => $team->id,
             'created_by' => $admin->id,
+            'owner_name' => 'Dono Teste',
+            'owner_phone' => '11988887777',
             'description' => 'Churrasco',
             'total_amount' => 100.00,
             'amount_per_member' => 50.00,
@@ -81,8 +83,24 @@ class PublicExpenseTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('expense.description', 'Churrasco')
             ->assertJsonPath('expense.pix_key', '11999999999')
+            ->assertJsonPath('expense.can_manage', false)
             ->assertJsonStructure([
-                'expense' => ['id', 'description', 'total_amount', 'pix_key', 'pix_qr_code', 'members'],
+                'expense' => ['id', 'description', 'total_amount', 'amount', 'amount_per_member', 'pix_key', 'pix_qr_code', 'participants', 'can_manage'],
+            ]);
+    }
+
+    public function test_public_expense_with_manage_returns_members_and_can_manage(): void
+    {
+        $this->createExpenseWithCharges();
+
+        $response = $this->getJson('/api/v1/public/expenses/test-hash-123?manage='.urlencode('manage-token-secret'));
+
+        $response->assertOk()
+            ->assertJsonPath('expense.can_manage', true)
+            ->assertJsonPath('expense.owner_phone', '11988887777')
+            ->assertJsonCount(2, 'expense.members')
+            ->assertJsonStructure([
+                'expense' => ['members', 'owner_name', 'amount_per_member'],
             ]);
     }
 
@@ -104,7 +122,8 @@ class PublicExpenseTest extends TestCase
 
         $response->assertOk()
             ->assertJsonCount(1, 'members')
-            ->assertJsonPath('members.0.name', 'Maria Silva');
+            ->assertJsonPath('members.0.name', 'Maria Silva')
+            ->assertJsonPath('members.0.unique_hash', 'participant-hash-bbb');
     }
 
     public function test_identify_member_by_phone(): void
@@ -297,5 +316,172 @@ class PublicExpenseTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('charge.status', 'validated');
+    }
+
+    public function test_participate_uploads_proof_and_sets_proof_sent(): void
+    {
+        Storage::fake('local');
+        $this->createExpenseWithCharges();
+
+        $file = UploadedFile::fake()->create('comp.jpg', 100, 'image/jpeg');
+        $response = $this->post('/api/v1/public/expenses/test-hash-123/participate', [
+            'name' => 'Visitante Novo',
+            'phone' => '11988776600',
+            'proof' => $file,
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('status', 'proof_sent');
+
+        $this->assertDatabaseHas('team_members', [
+            'name' => 'Visitante Novo',
+            'phone' => '11988776600',
+        ]);
+
+        $charge = Charge::query()->where('expense_id', Expense::where('public_hash', 'test-hash-123')->value('id'))
+            ->whereHas('teamMember', fn ($q) => $q->where('phone', '11988776600'))
+            ->first();
+        $this->assertNotNull($charge);
+        $this->assertSame('proof_sent', $charge->status);
+        $this->assertDatabaseHas('payment_proofs', [
+            'charge_id' => $charge->id,
+        ]);
+    }
+
+    public function test_participate_twice_same_phone_returns_422(): void
+    {
+        Storage::fake('local');
+        $this->createExpenseWithCharges();
+
+        $payload = [
+            'name' => 'Fulano',
+            'phone' => '11988776600',
+            'proof' => UploadedFile::fake()->create('a.jpg', 100, 'image/jpeg'),
+        ];
+        $this->post('/api/v1/public/expenses/test-hash-123/participate', $payload)->assertStatus(201);
+
+        $payload['proof'] = UploadedFile::fake()->create('b.jpg', 100, 'image/jpeg');
+        $this->post('/api/v1/public/expenses/test-hash-123/participate', $payload)
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Aguardando aprovacao do responsavel.');
+    }
+
+    public function test_participate_updates_existing_member_by_phone(): void
+    {
+        Storage::fake('local');
+        $this->createExpenseWithCharges();
+
+        $file = UploadedFile::fake()->create('comp.jpg', 100, 'image/jpeg');
+        $response = $this->post('/api/v1/public/expenses/test-hash-123/participate', [
+            'name' => 'Maria Atualizada',
+            'phone' => '11000000002',
+            'proof' => $file,
+        ]);
+
+        $response->assertStatus(201);
+
+        $this->assertDatabaseHas('team_members', [
+            'phone' => '11000000002',
+            'name' => 'Maria Atualizada',
+        ]);
+    }
+
+    public function test_public_patch_expense_with_manage_token(): void
+    {
+        $this->createExpenseWithCharges();
+        $newDue = now()->addDays(7)->format('Y-m-d');
+
+        $response = $this->patchJson('/api/v1/public/expenses/test-hash-123?manage='.urlencode('manage-token-secret'), [
+            'description' => 'Churrasco atualizado',
+            'amount' => 120,
+            'due_date' => $newDue,
+            'pix_key' => 'pix@novo.com',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('expense.description', 'Churrasco atualizado')
+            ->assertJsonPath('expense.pix_key', 'pix@novo.com');
+
+        $this->assertDatabaseHas('expenses', [
+            'public_hash' => 'test-hash-123',
+            'description' => 'Churrasco atualizado',
+        ]);
+    }
+
+    public function test_public_patch_expense_forbidden_without_token(): void
+    {
+        $this->createExpenseWithCharges();
+
+        $this->patchJson('/api/v1/public/expenses/test-hash-123', [
+            'description' => 'X',
+            'amount' => 99,
+            'due_date' => now()->format('Y-m-d'),
+            'pix_key' => 'k',
+        ])->assertForbidden();
+    }
+
+    public function test_add_public_participants_creates_charges(): void
+    {
+        $this->createExpenseWithCharges();
+
+        $this->patchJson('/api/v1/public/expenses/test-hash-123?manage='.urlencode('manage-token-secret'), [
+            'description' => 'Churrasco',
+            'amount' => 150,
+            'due_date' => now()->addDays(3)->format('Y-m-d'),
+            'pix_key' => '11999999999',
+        ]);
+
+        $response = $this->postJson('/api/v1/public/expenses/test-hash-123/participants?manage='.urlencode('manage-token-secret'), [
+            'participants' => [
+                ['name' => 'Zeca Novo', 'phone' => '11977776666'],
+            ],
+        ]);
+
+        $response->assertStatus(201);
+        $expenseId = Expense::where('public_hash', 'test-hash-123')->value('id');
+        $this->assertEquals(3, Charge::where('expense_id', $expenseId)->count());
+    }
+
+    public function test_add_public_participants_rejects_duplicate_phone(): void
+    {
+        $this->createExpenseWithCharges();
+        $this->patchJson('/api/v1/public/expenses/test-hash-123?manage='.urlencode('manage-token-secret'), [
+            'description' => 'Churrasco',
+            'amount' => 150,
+            'due_date' => now()->addDays(3)->format('Y-m-d'),
+            'pix_key' => '11999999999',
+        ]);
+
+        $this->postJson('/api/v1/public/expenses/test-hash-123/participants?manage='.urlencode('manage-token-secret'), [
+            'participants' => [
+                ['name' => 'Duplicado', 'phone' => '11000000002'],
+            ],
+        ])->assertStatus(422);
+    }
+
+    public function test_resend_link_rotates_unique_hash(): void
+    {
+        [, , $charge2] = $this->createExpenseWithCharges();
+        $member = $charge2->teamMember;
+        $old = $member->unique_hash;
+
+        $this->postJson('/api/v1/public/expenses/test-hash-123/participants/'.$member->id.'/resend-link', [
+            'manage_token' => 'manage-token-secret',
+        ])->assertOk();
+
+        $member->refresh();
+        $this->assertNotSame($old, $member->unique_hash);
+    }
+
+    public function test_resend_link_rejects_validated_participant(): void
+    {
+        Storage::fake('local');
+        [, , $charge2] = $this->createExpenseWithCharges();
+        $charge2->update(['status' => 'validated']);
+        $memberId = $charge2->teamMember->id;
+
+        $this->postJson('/api/v1/public/expenses/test-hash-123/participants/'.$memberId.'/resend-link', [
+            'manage_token' => 'manage-token-secret',
+        ])->assertStatus(422);
     }
 }

@@ -26,8 +26,11 @@ Route::prefix('v1')->group(function () {
 
     Route::prefix('public')->group(function () {
         Route::get('/expenses/{hash}', [PublicExpenseController::class, 'show']);
+        Route::patch('/expenses/{hash}', [PublicExpenseController::class, 'updateExpense']);
+        Route::post('/expenses/{hash}/participants', [PublicExpenseController::class, 'addParticipants']);
         Route::get('/expenses/{hash}/participants/{participantHash}', [PublicExpenseController::class, 'showParticipant']);
         Route::post('/expenses/{hash}/identify', [PublicExpenseController::class, 'identify']);
+        Route::post('/expenses/{hash}/participate', [PublicExpenseController::class, 'participate']);
         Route::post('/charges/{charge}/upload-proof', [PublicExpenseController::class, 'uploadProof']);
         Route::post('/charges/{charge}/mark-as-paid', [PublicExpenseController::class, 'markAsPaid']);
         Route::patch('/charges/{charge}/validate', [PublicExpenseController::class, 'validateCharge']);
@@ -59,6 +62,8 @@ Route::prefix('v1')->group(function () {
             Route::post('/{team}/expenses', [ExpenseController::class, 'store']);
             Route::get('/{team}/expenses', [ExpenseController::class, 'index']);
             Route::get('/{team}/expenses/{expense}', [ExpenseController::class, 'show']);
+            Route::patch('/{team}/expenses/{expense}', [ExpenseController::class, 'update']);
+            Route::post('/{team}/expenses/{expense}/participants', [ExpenseController::class, 'addParticipants']);
         });
     });
 

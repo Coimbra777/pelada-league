@@ -8,7 +8,7 @@ const props = defineProps({
     showResend: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['validate', 'reject', 'viewProof', 'resend']);
+const emit = defineEmits(['validate', 'reject', 'viewProof', 'resend', 'copyParticipantLink']);
 
 // Ordem: pagos, aguardando validacao, pendentes, rejeitados
 const statusOrder = { validated: 0, proof_sent: 1, pending: 2, rejected: 3 };
@@ -34,6 +34,7 @@ const sorted = computed(() => {
             @reject="emit('reject', $event)"
             @view-proof="emit('viewProof', $event)"
             @resend="emit('resend', $event)"
+            @copy-participant-link="emit('copyParticipantLink', $event)"
         />
     </div>
 </template>

@@ -35,8 +35,13 @@ async function enrichItem(item) {
     try {
         const data = await api.get(`/public/expenses/${item.hash}`);
         const members = data.expense?.members ?? [];
-        const total = members.length;
-        const paid = members.filter((m) => m.charge_status === 'validated').length;
+        const participants = data.expense?.participants ?? [];
+        const roster =
+            members.length > 0
+                ? members
+                : participants.map((p) => ({ charge_status: p.status }));
+        const total = roster.length;
+        const paid = roster.filter((m) => m.charge_status === 'validated').length;
         return {
             ...item,
             paid,

@@ -51,6 +51,42 @@ export const useExpenseStore = defineStore('expenses', {
             }
         },
 
+        async updateExpense(teamId, expenseId, formData) {
+            this.loading = true;
+            this.error = null;
+            try {
+                const data = await api.patch(`/teams/${teamId}/expenses/${expenseId}`, formData);
+                if (String(this.currentExpense?.id) === String(expenseId)) {
+                    this.currentExpense = data.expense;
+                }
+                return data.expense;
+            } catch (err) {
+                this.error = err.data?.message || 'Falha ao atualizar despesa.';
+                throw err;
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async addExpenseParticipants(teamId, expenseId, participants) {
+            this.loading = true;
+            this.error = null;
+            try {
+                const data = await api.post(`/teams/${teamId}/expenses/${expenseId}/participants`, {
+                    participants,
+                });
+                if (String(this.currentExpense?.id) === String(expenseId)) {
+                    this.currentExpense = data.expense;
+                }
+                return data.expense;
+            } catch (err) {
+                this.error = err.data?.message || 'Falha ao adicionar participantes.';
+                throw err;
+            } finally {
+                this.loading = false;
+            }
+        },
+
         async validateCharge(chargeId) {
             try {
                 const data = await api.patch(`/charges/${chargeId}/validate`);

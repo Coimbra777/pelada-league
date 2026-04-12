@@ -12,12 +12,21 @@ function formatCurrency(value) {
     return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+function roster() {
+    if (props.expense.members?.length) {
+        return props.expense.members;
+    }
+    return (props.expense.participants || []).map((p) => ({
+        charge_status: p.status,
+    }));
+}
+
 function paidCount() {
-    return props.expense.members?.filter(m => m.charge_status === 'validated').length ?? 0;
+    return roster().filter((m) => (m.charge_status || m.status) === 'validated').length;
 }
 
 function totalCount() {
-    return props.expense.members?.length ?? 0;
+    return roster().length;
 }
 </script>
 
@@ -40,7 +49,7 @@ function totalCount() {
                 <p class="text-lg font-semibold text-gray-900">{{ formatCurrency(expense.amount_per_member) }}</p>
             </div>
         </div>
-        <div v-if="expense.members" class="flex items-center gap-2">
+        <div v-if="totalCount() > 0" class="flex items-center gap-2">
             <div class="flex-1 bg-green-50 rounded-lg px-3 py-2 text-center">
                 <span class="text-lg font-bold text-green-700">{{ paidCount() }}</span>
                 <span class="text-sm text-green-600"> / {{ totalCount() }}</span>

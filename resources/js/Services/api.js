@@ -51,6 +51,39 @@ async function request(method, endpoint, body = null) {
     return data;
 }
 
+async function postFormData(endpoint, formData) {
+    const headers = {
+        'Accept': 'application/json',
+    };
+
+    const token = getToken();
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers,
+        body: formData,
+    });
+
+    if (response.status === 401) {
+        const isPublicEndpoint = endpoint.startsWith('/public/');
+        if (!isPublicEndpoint && endpoint !== '/auth/login') {
+            clearToken();
+        }
+        throw { status: 401, data: { message: 'Unauthorized' } };
+    }
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw { status: response.status, data };
+    }
+
+    return data;
+}
+
 async function upload(endpoint, file, fieldName = 'file') {
     const headers = {
         'Accept': 'application/json',
@@ -121,6 +154,7 @@ async function requestAbsolute(method, url, body = null) {
 export const api = {
     get: (url) => request('GET', url),
     post: (url, body) => request('POST', url, body),
+    postFormData: (url, formData) => postFormData(url, formData),
     put: (url, body) => request('PUT', url, body),
     patch: (url, body) => request('PATCH', url, body),
     delete: (url) => request('DELETE', url),

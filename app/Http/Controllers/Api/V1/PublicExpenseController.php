@@ -3,8 +3,11 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\AddPublicExpenseParticipantsRequest;
 use App\Http\Requests\Api\V1\IdentifyMemberRequest;
+use App\Http\Requests\Api\V1\ParticipatePublicExpenseRequest;
 use App\Http\Requests\Api\V1\StorePublicExpenseRequest;
+use App\Http\Requests\Api\V1\UpdatePublicExpenseRequest;
 use App\Http\Requests\Api\V1\UploadProofRequest;
 use App\Http\Resources\CreatedPublicExpenseResource;
 use App\Http\Resources\PaymentProofResource;
@@ -16,7 +19,10 @@ use App\Services\PaymentProofService;
 use App\Services\PublicExpenseCreatorService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PublicExpenseController extends Controller
@@ -42,17 +48,171 @@ class PublicExpenseController extends Controller
 
     public function show(Request $request, string $hash): JsonResponse
     {
-        $expense = Expense::byHash($hash)->first();
+        Log::info('Public expense lookup', ['hash' => $hash]);
 
-        if (! $expense) {
-            return response()->json(['message' => 'Not found.'], 404);
-        }
-
-        $expense->load('charges.teamMember');
+        $expense = Expense::where('public_hash', $hash)
+            ->with(['charges.teamMember', 'charges.paymentProofs'])
+            ->firstOrFail();
 
         return response()->json([
             'expense' => new PublicExpenseResource($expense),
         ]);
+    }
+
+    public function updateExpense(UpdatePublicExpenseRequest $request, string $hash): JsonResponse
+    {
+        $expense = Expense::where('public_hash', $hash)->firstOrFail();
+
+        $auth = $this->authorizeManageToken($request, $expense);
+        if ($auth instanceof JsonResponse) {
+            return $auth;
+        }
+
+        $data = $request->validated();
+        $totalAmount = (float) $data['amount'];
+        $chargeCount = $expense->charges()->count();
+        $amountPerMember = $chargeCount > 0
+            ? floor($totalAmount / $chargeCount * 100) / 100
+            : $totalAmount;
+
+        $payload = [
+            'description' => $data['description'],
+            'total_amount' => $totalAmount,
+            'amount_per_member' => $amountPerMember,
+            'due_date' => $data['due_date'],
+            'pix_key' => $data['pix_key'],
+        ];
+        if (array_key_exists('pix_qr_code', $data)) {
+            $payload['pix_qr_code'] = $data['pix_qr_code'];
+        }
+        $expense->update($payload);
+
+        $expense->load(['charges.teamMember', 'charges.paymentProofs']);
+
+        return response()->json([
+            'expense' => new PublicExpenseResource($expense),
+        ]);
+    }
+
+    public function addParticipants(AddPublicExpenseParticipantsRequest $request, string $hash): JsonResponse
+    {
+        $expense = Expense::where('public_hash', $hash)->firstOrFail();
+
+        $auth = $this->authorizeManageToken($request, $expense);
+        if ($auth instanceof JsonResponse) {
+            return $auth;
+        }
+
+        $participants = $request->input('participants', []);
+
+        $existingPhones = $expense->charges()
+            ->with('teamMember')
+            ->get()
+            ->map(fn (Charge $c) => preg_replace('/\D+/', '', (string) ($c->teamMember?->phone ?? '')))
+            ->filter()
+            ->all();
+
+        foreach ($participants as $p) {
+            $digits = $p['phone'];
+            if (in_array($digits, $existingPhones, true)) {
+                return response()->json([
+                    'message' => 'Participante com este telefone ja existe nesta despesa.',
+                ], 422);
+            }
+        }
+
+        $sumAllocated = (float) $expense->charges()->sum('amount');
+        $total = (float) $expense->total_amount;
+        $remaining = round($total - $sumAllocated, 2);
+        $nNew = count($participants);
+
+        if ($nNew < 1) {
+            return response()->json(['message' => 'Nenhum participante valido.'], 422);
+        }
+
+        if ($remaining < 0.01) {
+            return response()->json([
+                'message' => 'Nao ha valor disponivel no total da despesa para novos participantes. Ajuste o valor total.',
+            ], 422);
+        }
+
+        DB::transaction(function () use ($expense, $participants, $remaining, $nNew) {
+            $base = floor($remaining / $nNew * 100) / 100;
+            $running = 0.0;
+
+            foreach ($participants as $index => $p) {
+                $isLast = $index === $nNew - 1;
+                $amount = $isLast
+                    ? round($remaining - $running, 2)
+                    : $base;
+                $running += $amount;
+
+                $member = TeamMember::create([
+                    'team_id' => $expense->team_id,
+                    'user_id' => null,
+                    'name' => $p['name'],
+                    'phone' => $p['phone'],
+                    'role' => 'member',
+                ]);
+
+                Charge::create([
+                    'team_member_id' => $member->id,
+                    'expense_id' => $expense->id,
+                    'description' => $expense->description,
+                    'amount' => max(0, $amount),
+                    'due_date' => $expense->due_date,
+                    'status' => 'pending',
+                ]);
+            }
+
+            $expense->refresh();
+            $count = $expense->charges()->count();
+            $expense->update([
+                'amount_per_member' => $count > 0
+                    ? floor((float) $expense->total_amount / $count * 100) / 100
+                    : $expense->amount_per_member,
+            ]);
+        });
+
+        $expense->refresh()->load(['charges.teamMember', 'charges.paymentProofs']);
+
+        return response()->json([
+            'expense' => new PublicExpenseResource($expense),
+        ], 201);
+    }
+
+    public function participate(ParticipatePublicExpenseRequest $request, string $hash, PaymentProofService $service): JsonResponse
+    {
+        $expense = Expense::where('public_hash', $hash)->firstOrFail();
+
+        $validated = $request->validated();
+
+        try {
+            $charge = $this->resolveOrCreateParticipantCharge($expense, $validated['name'], $validated['phone']);
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        if ($charge->status === 'validated') {
+            return response()->json(['message' => 'Pagamento ja validado.'], 422);
+        }
+
+        if ($charge->status === 'proof_sent') {
+            return response()->json(['message' => 'Aguardando aprovacao do responsavel.'], 422);
+        }
+
+        try {
+            $service->uploadProof($charge, $request->file('proof'));
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $charge->update(['status' => 'proof_sent']);
+
+        return response()->json([
+            'message' => 'Aguardando aprovacao do responsavel.',
+            'status' => 'proof_sent',
+        ], 201);
     }
 
     public function showParticipant(string $hash, string $participantHash): JsonResponse
@@ -121,14 +281,21 @@ class PublicExpenseController extends Controller
 
         $validated = $request->validated();
         $name = $validated['name'];
-        $phone = $validated['phone'];
+        $phoneRaw = $validated['phone'];
+        $phoneDigits = preg_replace('/\D+/', '', $phoneRaw) ?? '';
 
         $charges = $expense->charges()
-            ->whereHas('teamMember', function ($q) use ($phone) {
-                $q->where('phone', $phone);
-            })
             ->with('teamMember')
-            ->get();
+            ->get()
+            ->filter(function (Charge $charge) use ($phoneDigits) {
+                if ($phoneDigits === '') {
+                    return false;
+                }
+                $m = $charge->teamMember;
+
+                return $m && preg_replace('/\D+/', '', (string) $m->phone) === $phoneDigits;
+            })
+            ->values();
 
         if ($charges->isEmpty()) {
             $charges = $expense->charges()
@@ -137,14 +304,26 @@ class PublicExpenseController extends Controller
                 })
                 ->with('teamMember')
                 ->get();
+
+            if ($charges->count() > 1 && $phoneDigits !== '') {
+                $narrowed = $charges->filter(function (Charge $charge) use ($phoneDigits) {
+                    $m = $charge->teamMember;
+
+                    return $m && preg_replace('/\D+/', '', (string) $m->phone) === $phoneDigits;
+                });
+                if ($narrowed->isNotEmpty()) {
+                    $charges = $narrowed->values();
+                }
+            }
         }
 
         if ($charges->isEmpty()) {
+            $phoneStored = $phoneDigits !== '' ? $phoneDigits : $phoneRaw;
             $member = TeamMember::create([
                 'team_id' => $expense->team_id,
                 'user_id' => null,
                 'name' => $name,
-                'phone' => $phone,
+                'phone' => $phoneStored,
                 'role' => 'member',
             ]);
 
@@ -161,11 +340,17 @@ class PublicExpenseController extends Controller
             $charges = collect([$charge]);
         }
 
+        $first = $charges->first();
+        if ($charges->count() > 1 && $first) {
+            $charges = collect([$first]);
+        }
+
         return response()->json([
-            'members' => $charges->map(fn ($charge) => [
-                'member_id' => $charge->teamMember->id,
-                'name' => $charge->teamMember->name,
-                'phone' => $charge->teamMember->phone,
+            'members' => $charges->map(fn (Charge $charge) => [
+                'member_id' => $charge->teamMember?->id,
+                'unique_hash' => $charge->teamMember?->unique_hash,
+                'name' => $charge->teamMember?->name,
+                'phone' => $charge->teamMember?->phone,
                 'charge_id' => $charge->id,
                 'amount' => $charge->amount,
                 'status' => $charge->status,
@@ -318,9 +503,14 @@ class PublicExpenseController extends Controller
             return response()->json(['message' => 'Not found.'], 404);
         }
 
-        if (in_array($charge->status, ['validated', 'proof_sent'], true)) {
-            return response()->json(['message' => 'Participante ja enviou ou foi validado.'], 422);
+        if ($charge->status === 'validated') {
+            return response()->json(['message' => 'Participante ja validado.'], 422);
         }
+
+        $member->update([
+            'unique_hash' => (string) Str::uuid(),
+        ]);
+        $member->refresh();
 
         $link = rtrim((string) config('app.url'), '/').'/p/'.$expense->public_hash.'/'.$member->unique_hash;
         $message = "Fala! Falta voce pagar a despesa:\n\n{$expense->description}\nValor: R$ ".number_format((float) $charge->amount, 2, ',', '.')."\n\nPague aqui:\n{$link}";
@@ -328,6 +518,54 @@ class PublicExpenseController extends Controller
         return response()->json([
             'link' => $link,
             'message' => $message,
+        ]);
+    }
+
+    private function resolveOrCreateParticipantCharge(Expense $expense, string $name, string $phone): Charge
+    {
+        $normalized = preg_replace('/\D+/', '', $phone) ?? '';
+
+        if (strlen($normalized) < 10) {
+            throw new \DomainException('Informe um telefone valido (min. 10 digitos).');
+        }
+
+        $member = TeamMember::query()
+            ->where('team_id', $expense->team_id)
+            ->get()
+            ->first(fn (TeamMember $m) => preg_replace('/\D+/', '', (string) $m->phone) === $normalized);
+
+        if ($member) {
+            $member->update(['name' => $name]);
+            $charge = $expense->charges()->where('team_member_id', $member->id)->first();
+            if (! $charge) {
+                $charge = Charge::create([
+                    'team_member_id' => $member->id,
+                    'expense_id' => $expense->id,
+                    'description' => $expense->description,
+                    'amount' => $expense->amount_per_member ?? 0,
+                    'due_date' => $expense->due_date,
+                    'status' => 'pending',
+                ]);
+            }
+
+            return $charge;
+        }
+
+        $member = TeamMember::create([
+            'team_id' => $expense->team_id,
+            'user_id' => null,
+            'name' => $name,
+            'phone' => $normalized,
+            'role' => 'member',
+        ]);
+
+        return Charge::create([
+            'team_member_id' => $member->id,
+            'expense_id' => $expense->id,
+            'description' => $expense->description,
+            'amount' => $expense->amount_per_member ?? 0,
+            'due_date' => $expense->due_date,
+            'status' => 'pending',
         ]);
     }
 
@@ -342,11 +580,21 @@ class PublicExpenseController extends Controller
 
     private function authorizeManageToken(Request $request, Expense $expense): Expense|JsonResponse
     {
-        $token = $request->input('manage_token') ?? $request->query('manage_token');
+        $token = $this->resolveManageToken($request);
         if (! $token || ! hash_equals((string) $expense->manage_token, (string) $token)) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
         return $expense;
+    }
+
+    private function resolveManageToken(Request $request): ?string
+    {
+        $t = $request->input('manage_token')
+            ?? $request->query('manage_token')
+            ?? $request->query('manage')
+            ?? $request->header('X-Manage-Token');
+
+        return $t !== null && $t !== '' ? (string) $t : null;
     }
 }

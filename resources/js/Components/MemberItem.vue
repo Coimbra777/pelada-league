@@ -7,7 +7,7 @@ const props = defineProps({
     showResend: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['validate', 'reject', 'viewProof', 'resend']);
+const emit = defineEmits(['validate', 'reject', 'viewProof', 'resend', 'copyParticipantLink']);
 
 function formatCurrency(value) {
     return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -15,7 +15,7 @@ function formatCurrency(value) {
 
 const status = props.member.charge_status || props.member.status;
 
-const canResend = props.showResend && ['pending', 'rejected'].includes(status);
+const canResend = props.showResend && ['pending', 'rejected', 'proof_sent'].includes(status);
 </script>
 
 <template>
@@ -28,13 +28,22 @@ const canResend = props.showResend && ['pending', 'rejected'].includes(status);
             <span class="text-sm font-semibold text-gray-900 whitespace-nowrap">{{ formatCurrency(member.amount) }}</span>
             <StatusBadge :status="status" />
         </div>
+        <div v-if="isAdmin && member.participant_url" class="w-full sm:w-auto mt-1 sm:mt-0">
+            <button
+                type="button"
+                class="w-full sm:w-auto px-3 py-2 text-xs font-medium text-gray-700 bg-gray-100 rounded-lg min-h-[44px]"
+                @click="emit('copyParticipantLink', member.participant_url)"
+            >
+                Copiar link individual
+            </button>
+        </div>
         <div v-if="canResend" class="w-full sm:w-auto mt-1 sm:mt-0">
             <button
                 type="button"
                 class="w-full sm:w-auto px-3 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-lg min-h-[44px]"
                 @click="emit('resend', member.id)"
             >
-                Reenviar link
+                Gerar link do participante
             </button>
         </div>
         <div v-if="isAdmin" class="flex flex-wrap gap-1 sm:ml-2 sm:justify-end">

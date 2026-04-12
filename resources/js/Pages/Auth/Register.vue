@@ -26,7 +26,10 @@ const errors = ref({});
 async function submit() {
     errors.value = {};
     try {
-        await authStore.register(form);
+        await authStore.register({
+            ...form,
+            phone: form.phone.replace(/\D/g, '') || null,
+        });
         toast.success('Conta criada com sucesso!');
         router.visit('/dashboard');
     } catch (err) {
@@ -47,7 +50,7 @@ async function submit() {
             <Input v-model="form.email" type="email" label="E-mail" placeholder="seu@email.com" :error="errors.email" required />
             <Input v-model="form.password" type="password" label="Senha" placeholder="Minimo 6 caracteres" :error="errors.password" required />
             <Input v-model="form.password_confirmation" type="password" label="Confirmar Senha" placeholder="Repita a senha" required />
-            <Input v-model="form.phone" label="Telefone" placeholder="11999999999 (opcional)" :error="errors.phone" />
+            <Input v-model="form.phone" phone-mask label="Telefone" placeholder="(11) 99999-9999 (opcional)" :error="errors.phone" />
             <Input v-model="form.cpf" label="CPF" placeholder="11 digitos, sem pontos (opcional)" :error="errors.cpf" />
             <p v-if="authStore.error && typeof authStore.error === 'string'" class="text-sm text-red-600">{{ authStore.error }}</p>
             <Button type="submit" :loading="authStore.loading" class="w-full">Criar Conta</Button>

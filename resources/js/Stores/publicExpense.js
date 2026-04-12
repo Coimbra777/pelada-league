@@ -110,5 +110,35 @@ export const usePublicExpenseStore = defineStore('publicExpense', {
                 manage_token: manageToken,
             });
         },
+
+        async patchExpense(hash, manageToken, payload) {
+            this.error = null;
+            const q = manageToken ? `?manage=${encodeURIComponent(manageToken)}` : '';
+            const data = await api.patch(`/public/expenses/${hash}${q}`, payload);
+            this.expense = data.expense;
+            return data;
+        },
+
+        async addExpenseParticipants(hash, manageToken, payload) {
+            this.error = null;
+            const q = manageToken ? `?manage=${encodeURIComponent(manageToken)}` : '';
+            const data = await api.post(`/public/expenses/${hash}/participants${q}`, payload);
+            this.expense = data.expense;
+            return data;
+        },
+
+        async participate(hash, { name, phone, file }) {
+            this.error = null;
+            const formData = new FormData();
+            formData.append('name', name);
+            formData.append('phone', phone);
+            formData.append('proof', file);
+            try {
+                return await api.postFormData(`/public/expenses/${hash}/participate`, formData);
+            } catch (err) {
+                this.error = err.data?.message || 'Falha ao enviar comprovante.';
+                throw err;
+            }
+        },
     },
 });

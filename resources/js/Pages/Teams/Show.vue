@@ -39,7 +39,7 @@ async function addMember() {
     try {
         await teamStore.addMember(props.id, {
             name: newMember.name,
-            phone: newMember.phone,
+            phone: newMember.phone.replace(/\D/g, ''),
             email: newMember.email,
         });
         toast.success('Membro adicionado!');
@@ -183,7 +183,7 @@ function formatCurrency(value) {
             <Modal :show="showAddMember" title="Adicionar Membro" @close="showAddMember = false">
                 <form @submit.prevent="addMember" class="space-y-4">
                     <Input v-model="newMember.name" label="Nome" placeholder="Nome completo" required />
-                    <Input v-model="newMember.phone" label="Telefone" placeholder="11999999999" required />
+                    <Input v-model="newMember.phone" phone-mask label="Telefone" placeholder="(11) 99999-9999" required />
                     <Input v-model="newMember.email" type="email" label="Email (opcional)" placeholder="email@exemplo.com" />
                     <p v-if="teamStore.error" class="text-sm text-red-600">{{ teamStore.error }}</p>
                 </form>

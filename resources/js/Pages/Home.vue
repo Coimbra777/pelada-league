@@ -10,6 +10,7 @@ import PublicLayout from '../Layouts/PublicLayout.vue';
 import Card from '../Components/Card.vue';
 import Input from '../Components/Input.vue';
 import Button from '../Components/Button.vue';
+import ParticipantsInput from '../Components/ParticipantsInput.vue';
 
 defineOptions({ layout: PublicLayout });
 
@@ -26,23 +27,11 @@ const form = reactive({
     due_date: '',
 });
 
-const participantsText = ref('');
-const manualRows = ref([{ name: '', phone: '' }]);
+const participants = ref([]);
 const errors = ref({});
 const loading = ref(false);
 
 const today = new Date().toISOString().split('T')[0];
-
-function addRow() {
-    manualRows.value.push({ name: '', phone: '' });
-}
-
-function removeRow(i) {
-    manualRows.value.splice(i, 1);
-    if (!manualRows.value.length) {
-        manualRows.value.push({ name: '', phone: '' });
-    }
-}
 
 async function submit() {
     errors.value = {};
@@ -58,13 +47,6 @@ async function submit() {
     }
 
     loading.value = true;
-    const participants = manualRows.value
-        .map((r) => ({
-            name: r.name.trim(),
-            phone: r.phone.replace(/\D/g, ''),
-        }))
-        .filter((r) => r.name && r.phone.length >= 10);
-
     const payload = {
         owner_name: form.owner_name.trim(),
         owner_phone: form.owner_phone.replace(/\D/g, ''),
@@ -73,8 +55,7 @@ async function submit() {
         pix_key: form.pix_key.trim(),
         pix_qr_code: form.pix_qr_code.trim() || null,
         due_date: form.due_date,
-        participants,
-        participants_text: participantsText.value.trim() || undefined,
+        participants: participants.value,
     };
 
     try {
@@ -177,34 +158,7 @@ function onAmountInput(e) {
                 <Input v-model="form.due_date" type="date" label="Vencimento" :min="today" :error="errors.due_date" required />
                 <p class="text-xs text-gray-500">Exibicao: {{ formatDateIsoToBr(form.due_date || null) }}</p>
 
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Participantes (manual)</label>
-                    <div v-for="(row, i) in manualRows" :key="i" class="flex gap-2 mb-2">
-                        <input                            v-model="row.name"
-                            type="text"
-                            placeholder="Nome"
-                            class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                        />
-                        <input
-                            v-model="row.phone"
-                            type="tel"
-                            placeholder="Telefone"
-                            class="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                        />
-                        <button type="button" class="text-red-600 text-sm px-2" @click="removeRow(i)">x</button>
-                    </div>
-                    <button type="button" class="text-sm text-indigo-600 font-medium" @click="addRow">+ Adicionar linha</button>
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Ou cole a lista (estilo WhatsApp)</label>
-                    <textarea
-                        v-model="participantsText"
-                        rows="4"
-                        placeholder="Joao 98999999999&#10;Maria 98988888888"
-                        class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                </div>
+                <ParticipantsInput v-model="participants" :block-incomplete-rows="false" />
                 <p v-if="errors.participants" class="text-sm text-red-600">{{ errors.participants }}</p>
 
                 <Button type="submit" class="w-full min-h-[52px]" size="lg" :loading="loading">
