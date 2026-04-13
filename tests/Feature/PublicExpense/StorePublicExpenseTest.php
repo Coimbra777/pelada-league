@@ -3,6 +3,7 @@
 namespace Tests\Feature\PublicExpense;
 
 use App\Models\Expense;
+use App\Models\TeamMember;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -55,5 +56,54 @@ class StorePublicExpenseTest extends TestCase
 
         $response->assertCreated();
         $this->assertEquals(2, Expense::first()->charges()->count());
+    }
+
+    public function test_include_owner_as_participant_adds_owner_to_split(): void
+    {
+        $response = $this->postJson('/api/public/expenses', [
+            'owner_name' => 'Ana',
+            'owner_phone' => '11988776655',
+            'description' => 'Churras',
+            'amount' => 100,
+            'pix_key' => 'ana@email.com',
+            'due_date' => now()->addDays(5)->format('Y-m-d'),
+            'include_owner_as_participant' => true,
+            'participants' => [
+                ['name' => 'Beto', 'phone' => '11911112222'],
+            ],
+        ]);
+
+        $response->assertCreated();
+        $expense = Expense::first();
+        $this->assertEquals(2, $expense->charges()->count());
+
+        $phones = $expense->charges()->with('teamMember')->get()->map(
+            fn ($c) => $c->teamMember?->phone
+        )->sort()->values()->all();
+        $this->assertEquals(['11911112222', '11988776655'], $phones);
+
+        $total = round((float) $expense->charges()->sum('amount'), 2);
+        $this->assertEquals(100.0, $total);
+    }
+
+    public function test_include_owner_as_participant_does_not_duplicate_phone(): void
+    {
+        $response = $this->postJson('/api/public/expenses', [
+            'owner_name' => 'Ana',
+            'owner_phone' => '11988776655',
+            'description' => 'Churras',
+            'amount' => 100,
+            'pix_key' => 'ana@email.com',
+            'due_date' => now()->addDays(5)->format('Y-m-d'),
+            'include_owner_as_participant' => true,
+            'participants' => [
+                ['name' => 'Ana Mesmo', 'phone' => '11988776655'],
+                ['name' => 'Beto', 'phone' => '11911112222'],
+            ],
+        ]);
+
+        $response->assertCreated();
+        $this->assertEquals(2, Expense::first()->charges()->count());
+        $this->assertEquals(2, TeamMember::count());
     }
 }

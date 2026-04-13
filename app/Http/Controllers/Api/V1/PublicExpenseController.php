@@ -448,8 +448,17 @@ class PublicExpenseController extends Controller
             return $blocked;
         }
 
+        if ($charge->status === 'validated') {
+            return response()->json(['message' => 'Este pagamento ja foi validado.'], 422);
+        }
+
         if ($charge->status !== 'proof_sent') {
-            return response()->json(['message' => 'Charge must have proof_sent status.'], 422);
+            $message = match ($charge->status) {
+                'rejected' => 'Comprovante rejeitado. O participante precisa enviar um novo comprovante e marcar como pago antes da validacao.',
+                default => 'So e possivel validar apos o participante enviar o comprovante e marcar como pago (status aguardando aprovacao).',
+            };
+
+            return response()->json(['message' => $message], 422);
         }
 
         $charge->update([
@@ -482,8 +491,17 @@ class PublicExpenseController extends Controller
             return $blocked;
         }
 
+        if ($charge->status === 'validated') {
+            return response()->json(['message' => 'Nao e possivel rejeitar um pagamento ja validado.'], 422);
+        }
+
         if ($charge->status !== 'proof_sent') {
-            return response()->json(['message' => 'Charge must have proof_sent status.'], 422);
+            $message = match ($charge->status) {
+                'rejected' => 'Este comprovante ja foi rejeitado.',
+                default => 'So e possivel rejeitar quando houver comprovante aguardando aprovacao.',
+            };
+
+            return response()->json(['message' => $message], 422);
         }
 
         $charge->update(['status' => 'rejected']);

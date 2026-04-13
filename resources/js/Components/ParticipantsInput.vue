@@ -266,7 +266,7 @@ defineExpose({ validate, reset });
                 class="mt-3 w-full min-h-[48px] rounded-lg border border-indigo-200 bg-indigo-50 px-4 text-sm font-semibold text-indigo-800 active:bg-indigo-100 sm:w-auto"
                 @click="addRow"
             >
-                + Adicionar linha
+                + Adicionar participante
             </button>
         </div>
 

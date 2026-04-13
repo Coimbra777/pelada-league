@@ -28,6 +28,7 @@ const form = reactive({
 });
 
 const participants = ref([]);
+const includeOwnerAsParticipant = ref(false);
 const errors = ref({});
 const loading = ref(false);
 
@@ -56,6 +57,7 @@ async function submit() {
         pix_qr_code: form.pix_qr_code.trim() || null,
         due_date: form.due_date,
         participants: participants.value,
+        include_owner_as_participant: includeOwnerAsParticipant.value,
     };
 
     try {
@@ -147,6 +149,7 @@ function onAmountInput(e) {
                     <p v-if="errors.amount" class="mt-1 text-sm text-red-600">{{ errors.amount }}</p>
                 </div>
                 <Input v-model="form.pix_key" label="Chave PIX" :error="errors.pix_key" required />
+                <!--
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">QR Code PIX (opcional)</label>
                     <textarea
@@ -155,8 +158,23 @@ function onAmountInput(e) {
                         class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                 </div>
+                -->
                 <Input v-model="form.due_date" type="date" label="Vencimento" :min="today" :error="errors.due_date" required />
                 <p class="text-xs text-gray-500">Exibicao: {{ formatDateIsoToBr(form.due_date || null) }}</p>
+
+                <label class="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 cursor-pointer">
+                    <input
+                        v-model="includeOwnerAsParticipant"
+                        type="checkbox"
+                        class="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span class="text-sm text-gray-700">
+                        Incluir-me como participante da divisao
+                        <span class="block text-xs text-gray-500 mt-0.5">
+                            Voce tambem aparecera na lista para pagar sua parte (alem de receber o PIX como responsavel).
+                        </span>
+                    </span>
+                </label>
 
                 <ParticipantsInput v-model="participants" :block-incomplete-rows="false" />
                 <p v-if="errors.participants" class="text-sm text-red-600">{{ errors.participants }}</p>

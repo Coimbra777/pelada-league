@@ -324,8 +324,8 @@ async function validateCharge(chargeId) {
         await store.validateCharge(chargeId, props.manage);
         toast.success('Pagamento validado!');
         await store.fetchExpense(props.hash, props.manage);
-    } catch {
-        toast.error('Falha ao validar.');
+    } catch (err) {
+        toast.error(err.data?.message || 'Falha ao validar.');
     }
 }
 
@@ -335,8 +335,8 @@ async function rejectCharge(chargeId) {
         await store.rejectCharge(chargeId, props.manage);
         toast.success('Comprovante rejeitado.');
         await store.fetchExpense(props.hash, props.manage);
-    } catch {
-        toast.error('Falha ao rejeitar.');
+    } catch (err) {
+        toast.error(err.data?.message || 'Falha ao rejeitar.');
     }
 }
 
@@ -660,6 +660,7 @@ async function confirmCloseExpense() {
                             />
                             <p v-if="editFieldErrors.pix_key" class="text-xs text-red-600 mt-1">{{ editFieldErrors.pix_key }}</p>
                         </div>
+                        <!--
                         <div>
                             <label class="block text-xs font-medium text-gray-600 mb-1">QR Code PIX (base64, opcional)</label>
                             <textarea
@@ -669,6 +670,7 @@ async function confirmCloseExpense() {
                                 class="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-mono"
                             />
                         </div>
+                        -->
                         <div class="flex gap-2 pt-2">
                             <button
                                 type="button"

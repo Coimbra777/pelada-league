@@ -23,6 +23,7 @@ class StorePublicExpenseRequest extends FormRequest
             'pix_key' => ['required', 'string', 'max:255'],
             'pix_qr_code' => ['nullable', 'string'],
             'due_date' => ['required', 'date', 'after_or_equal:today'],
+            'include_owner_as_participant' => ['sometimes', 'boolean'],
             'participants' => ['sometimes', 'array'],
             'participants.*.name' => ['required_with:participants.*.phone', 'string', 'max:255'],
             'participants.*.phone' => ['required_with:participants.*.name', 'string', 'max:32'],
@@ -67,6 +68,15 @@ class StorePublicExpenseRequest extends FormRequest
             }
             $seen[$phone] = true;
             $merged[] = ['name' => $name, 'phone' => $phone];
+        }
+
+        if ($this->boolean('include_owner_as_participant')) {
+            $ownerPhone = PhoneNormalizer::digits((string) $this->input('owner_phone'));
+            $ownerName = trim((string) $this->input('owner_name'));
+            if ($ownerPhone !== '' && strlen($ownerPhone) >= 10 && $ownerName !== '' && ! isset($seen[$ownerPhone])) {
+                array_unshift($merged, ['name' => $ownerName, 'phone' => $ownerPhone]);
+                $seen[$ownerPhone] = true;
+            }
         }
 
         $this->merge(['participants' => $merged]);
