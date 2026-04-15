@@ -11,6 +11,8 @@ import PublicLayout from '../../Layouts/PublicLayout.vue';
 import Card from '../../Components/Card.vue';
 import Button from '../../Components/Button.vue';
 import StatusBadge from '../../Components/StatusBadge.vue';
+import ChargeParticipantStateCard from '../../Components/ChargeParticipantStateCard.vue';
+import { getChargeStatusUx } from '../../constants/chargeStatusUx.js';
 import LoadingSpinner from '../../Components/LoadingSpinner.vue';
 import PixCard from '../../Components/PixCard.vue';
 import MemberList from '../../Components/MemberList.vue';
@@ -57,7 +59,6 @@ const canUpload = computed(
 );
 const waitingApproval = computed(() => charge.value?.status === 'proof_sent');
 const done = computed(() => charge.value?.status === 'validated');
-const rejected = computed(() => charge.value?.status === 'rejected');
 
 /* --- Modo grupo (/p/{hash}) --- */
 const showParticipateForm = ref(false);
@@ -344,22 +345,11 @@ async function copyPublicLinkGroup() {
                             >
                                 {{ participateValidationError }}
                             </div>
-                            <div
+                            <ChargeParticipantStateCard
                                 v-if="participateValidated && !participateValidating"
-                                class="rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm space-y-2"
-                            >
-                                <div class="flex flex-wrap items-center gap-2">
-                                    <span class="text-xs text-gray-600">Status:</span>
-                                    <StatusBadge :status="participateValidated.status" />
-                                </div>
-                                <p class="font-medium text-gray-900">{{ participateValidated.message }}</p>
-                                <p
-                                    v-if="participateValidated.rejection_reason"
-                                    class="text-xs text-orange-900 bg-orange-50 rounded px-2 py-1"
-                                >
-                                    {{ participateValidated.rejection_reason }}
-                                </p>
-                            </div>
+                                :status="participateValidated.status"
+                                :rejection-reason="participateValidated.rejection_reason"
+                            />
                             <template v-if="participateValidated?.can_submit_proof && !participateValidating">
                                 <div>
                                     <label class="block text-xs font-medium text-gray-600 mb-1">Comprovante</label>
@@ -380,7 +370,13 @@ async function copyPublicLinkGroup() {
                                     :disabled="participateProofSubmitting || !proofFile || participateValidating"
                                     @click="submitGroupProof"
                                 >
-                                    {{ participateProofSubmitting ? 'Enviando...' : 'Enviar comprovante' }}
+                                    {{
+                                        participateProofSubmitting
+                                            ? 'Enviando...'
+                                            : participateValidated?.status === 'rejected'
+                                              ? 'Enviar novo comprovante'
+                                              : 'Enviar comprovante'
+                                    }}
                                 </button>
                             </template>
                         </div>
@@ -464,20 +460,31 @@ async function copyPublicLinkGroup() {
                     class="mb-4"
                 />
 
-                <Card v-if="done" class="mb-4">
-                    <div class="text-center py-4">
-                        <p class="text-lg font-semibold text-green-700">Pagamento confirmado!</p>
-                        <p class="text-sm text-gray-500 mt-1">Obrigado.</p>
+                <Card v-if="done" class="mb-4 border-emerald-200 bg-emerald-50/50">
+                    <div class="text-center py-5 px-3 space-y-2">
+                        <p class="text-lg font-semibold text-emerald-900">
+                            {{ getChargeStatusUx('validated').panelTitle }}
+                        </p>
+                        <p class="text-sm text-gray-600">
+                            {{ getChargeStatusUx('validated').panelBody }}
+                        </p>
                     </div>
                 </Card>
 
-                <Card v-else-if="waitingApproval" class="mb-4">
-                    <div class="text-center py-4 space-y-2">
-                        <StatusBadge status="proof_sent" />
-                        <p class="text-sm text-gray-700 font-medium">Aguardando aprovacao do responsavel.</p>
-                        <p class="text-xs text-gray-500">
-                            Voce pode voltar a este link a qualquer momento; o status e atualizado automaticamente.
-                        </p>
+                <Card v-else-if="waitingApproval" class="mb-4 border-amber-200 bg-amber-50/40">
+                    <div class="flex flex-col items-center text-center py-5 px-2 space-y-4">
+                        <span
+                            class="h-10 w-10 rounded-full border-2 border-amber-500 border-t-transparent animate-spin shrink-0"
+                            aria-hidden="true"
+                        />
+                        <div class="space-y-2 max-w-sm">
+                            <p class="text-base font-semibold text-gray-900">
+                                {{ getChargeStatusUx('proof_sent').panelTitle }}
+                            </p>
+                            <p class="text-sm text-gray-600 leading-relaxed">
+                                {{ getChargeStatusUx('proof_sent').panelBody }}
+                            </p>
+                        </div>
                     </div>
                 </Card>
 
@@ -492,33 +499,35 @@ async function copyPublicLinkGroup() {
                     </div>
                 </Card>
 
-                <Card v-if="rejected && canUpload" class="mb-4 border-orange-200 bg-orange-50">
-                    <p class="text-sm text-orange-900 text-center py-2 font-medium">
-                        Comprovante rejeitado. Envie um novo arquivo abaixo.
-                    </p>
-                    <p v-if="charge?.rejection_reason" class="text-xs text-orange-900/90 text-center px-2 pb-2">
-                        {{ charge.rejection_reason }}
-                    </p>
-                </Card>
-
                 <template v-if="canUpload && charge">
-                    <Card title="Enviar comprovante" class="mb-4">
-                        <UploadProof :charge-id="charge.id" @uploaded="afterProofUploaded">
-                            <template #after-upload>
-                                <Button
-                                    class="w-full min-h-[48px]"
-                                    size="lg"
-                                    :disabled="!proofReady"
-                                    :loading="markingPaid"
-                                    @click="markAsPaid"
-                                >
-                                    Marcar como pago
-                                </Button>
-                                <p v-if="!proofReady" class="text-xs text-gray-500 mt-2 text-center">
-                                    Envie o comprovante para habilitar.
+                    <Card class="mb-4">
+                        <div class="space-y-4">
+                            <ChargeParticipantStateCard
+                                :status="charge.status"
+                                :rejection-reason="charge.rejection_reason"
+                            />
+                            <div>
+                                <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                                    Comprovante
                                 </p>
-                            </template>
-                        </UploadProof>
+                                <UploadProof :charge-id="charge.id" @uploaded="afterProofUploaded">
+                                    <template #after-upload>
+                                        <Button
+                                            class="w-full min-h-[48px]"
+                                            size="lg"
+                                            :disabled="!proofReady"
+                                            :loading="markingPaid"
+                                            @click="markAsPaid"
+                                        >
+                                            Marcar como pago
+                                        </Button>
+                                        <p v-if="!proofReady" class="text-xs text-gray-500 mt-2 text-center">
+                                            Envie o comprovante para habilitar a confirmacao.
+                                        </p>
+                                    </template>
+                                </UploadProof>
+                            </div>
+                        </div>
                     </Card>
                 </template>
 

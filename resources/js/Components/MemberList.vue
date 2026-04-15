@@ -8,6 +8,14 @@ const props = defineProps({
     showResend: { type: Boolean, default: false },
     /** Quando false, oculta validar/rejeitar/reenviar/copiar link; mantem ver comprovante para leitura */
     moderationEnabled: { type: Boolean, default: true },
+    /**
+     * Rótulos de status de cobrança no badge. Se null, admin usa 'admin', senão 'participant'.
+     */
+    chargeBadgePerspective: {
+        type: String,
+        default: null,
+        validator: (v) => v === null || ['participant', 'admin'].includes(v),
+    },
 });
 
 const emit = defineEmits(['validate', 'reject', 'viewProof', 'resend', 'copyParticipantLink']);
@@ -22,6 +30,13 @@ const sorted = computed(() => {
         return sa - sb;
     });
 });
+
+const resolvedChargePerspective = computed(() => {
+    if (props.chargeBadgePerspective) {
+        return props.chargeBadgePerspective;
+    }
+    return props.isAdmin ? 'admin' : 'participant';
+});
 </script>
 
 <template>
@@ -33,6 +48,7 @@ const sorted = computed(() => {
             :is-admin="isAdmin"
             :show-resend="showResend"
             :moderation-enabled="moderationEnabled"
+            :charge-perspective="resolvedChargePerspective"
             @validate="emit('validate', $event)"
             @reject="emit('reject', $event)"
             @view-proof="emit('viewProof', $event)"

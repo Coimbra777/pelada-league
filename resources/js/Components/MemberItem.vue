@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from 'vue';
 import StatusBadge from './StatusBadge.vue';
 
 const props = defineProps({
@@ -6,6 +7,12 @@ const props = defineProps({
     isAdmin: { type: Boolean, default: false },
     showResend: { type: Boolean, default: false },
     moderationEnabled: { type: Boolean, default: true },
+    /** 'admin' no painel do responsável para rótulos de cobrança adequados */
+    chargePerspective: {
+        type: String,
+        default: 'participant',
+        validator: (v) => ['participant', 'admin'].includes(v),
+    },
 });
 
 const emit = defineEmits(['validate', 'reject', 'viewProof', 'resend', 'copyParticipantLink']);
@@ -14,9 +21,16 @@ function formatCurrency(value) {
     return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-const status = props.member.charge_status || props.member.status;
+const status = computed(() => props.member.charge_status || props.member.status);
 
-const canResend = props.showResend && ['pending', 'rejected', 'proof_sent'].includes(status);
+const canResend = computed(
+    () => props.showResend && ['pending', 'rejected', 'proof_sent'].includes(status.value),
+);
+
+/** Somente com comprovante aguardando decisão — em `rejected` o participante deve reenviar primeiro. */
+const canValidateOrReject = computed(
+    () => props.moderationEnabled && status.value === 'proof_sent',
+);
 </script>
 
 <template>
@@ -27,7 +41,7 @@ const canResend = props.showResend && ['pending', 'rejected', 'proof_sent'].incl
         </div>
         <div class="flex flex-wrap items-center gap-2 sm:ml-3">
             <span class="text-sm font-semibold text-gray-900 whitespace-nowrap">{{ formatCurrency(member.amount) }}</span>
-            <StatusBadge :status="status" />
+            <StatusBadge :status="status" :charge-perspective="chargePerspective" />
         </div>
         <div v-if="moderationEnabled && isAdmin && member.participant_url" class="w-full sm:w-auto mt-1 sm:mt-0">
             <button
@@ -57,7 +71,7 @@ const canResend = props.showResend && ['pending', 'rejected', 'proof_sent'].incl
                 Ver comprovante
             </button>
             <button
-                v-if="moderationEnabled && status === 'proof_sent'"
+                v-if="canValidateOrReject"
                 type="button"
                 class="px-2 py-1 text-xs text-green-700 hover:bg-green-50 rounded font-medium"
                 @click="emit('validate', member.charge_id)"
@@ -65,7 +79,7 @@ const canResend = props.showResend && ['pending', 'rejected', 'proof_sent'].incl
                 Validar
             </button>
             <button
-                v-if="moderationEnabled && status === 'proof_sent'"
+                v-if="canValidateOrReject"
                 type="button"
                 class="px-2 py-1 text-xs text-red-700 hover:bg-red-50 rounded font-medium"
                 @click="emit('reject', member.charge_id)"

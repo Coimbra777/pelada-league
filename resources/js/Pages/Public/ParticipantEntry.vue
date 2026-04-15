@@ -8,7 +8,7 @@ import { useDebouncedParticipantValidation } from '../../Composables/useDebounce
 import { formatPhoneBr } from '../../Composables/useInputMasks.js';
 import ParticipantLayout from '../../Layouts/ParticipantLayout.vue';
 import Button from '../../Components/Button.vue';
-import StatusBadge from '../../Components/StatusBadge.vue';
+import ChargeParticipantStateCard from '../../Components/ChargeParticipantStateCard.vue';
 
 defineOptions({ layout: ParticipantLayout });
 
@@ -281,19 +281,11 @@ async function submitProof() {
                 {{ validationError }}
             </div>
 
-            <div
+            <ChargeParticipantStateCard
                 v-if="validated && !validationLoading"
-                class="rounded-xl border border-stone-200 bg-stone-50 px-3 py-3 text-sm space-y-2"
-            >
-                <div class="flex flex-wrap items-center gap-2">
-                    <span class="text-xs text-gray-600">Status:</span>
-                    <StatusBadge :status="validated.status" />
-                </div>
-                <p class="text-gray-900 font-medium">{{ validated.message }}</p>
-                <p v-if="validated.rejection_reason" class="text-xs text-orange-900 bg-orange-50 rounded-lg px-2 py-1.5">
-                    Motivo da rejeicao: {{ validated.rejection_reason }}
-                </p>
-            </div>
+                :status="validated.status"
+                :rejection-reason="validated.rejection_reason"
+            />
 
             <template v-if="validated?.can_submit_proof && !validationLoading">
                 <div>
@@ -318,7 +310,7 @@ async function submitProof() {
                     :loading="submittingProof"
                     @click="submitProof"
                 >
-                    Enviar comprovante
+                    {{ validated?.status === 'rejected' ? 'Enviar novo comprovante' : 'Enviar comprovante' }}
                 </Button>
             </template>
         </section>

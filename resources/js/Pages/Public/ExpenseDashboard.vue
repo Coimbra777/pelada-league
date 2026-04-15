@@ -16,6 +16,7 @@ import MemberList from '../../Components/MemberList.vue';
 import WhatsAppShareButton from '../../Components/WhatsAppShareButton.vue';
 import ProofViewerModal from '../../Components/ProofViewerModal.vue';
 import StatusBadge from '../../Components/StatusBadge.vue';
+import ChargeParticipantStateCard from '../../Components/ChargeParticipantStateCard.vue';
 import Modal from '../../Components/Modal.vue';
 import Button from '../../Components/Button.vue';
 import ExpenseSummary from '../../Components/ExpenseSummary.vue';
@@ -509,22 +510,11 @@ async function confirmCloseExpense() {
                             >
                                 {{ participateValidationError }}
                             </div>
-                            <div
+                            <ChargeParticipantStateCard
                                 v-if="participateValidated && !participateValidating"
-                                class="rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm space-y-2"
-                            >
-                                <div class="flex flex-wrap items-center gap-2">
-                                    <span class="text-xs text-gray-600">Status:</span>
-                                    <StatusBadge :status="participateValidated.status" />
-                                </div>
-                                <p class="font-medium text-gray-900">{{ participateValidated.message }}</p>
-                                <p
-                                    v-if="participateValidated.rejection_reason"
-                                    class="text-xs text-orange-900 bg-orange-50 rounded px-2 py-1"
-                                >
-                                    {{ participateValidated.rejection_reason }}
-                                </p>
-                            </div>
+                                :status="participateValidated.status"
+                                :rejection-reason="participateValidated.rejection_reason"
+                            />
                             <template v-if="participateValidated?.can_submit_proof && !participateValidating">
                                 <div>
                                     <label class="block text-xs font-medium text-gray-600 mb-1">Comprovante</label>
@@ -545,7 +535,13 @@ async function confirmCloseExpense() {
                                     :disabled="participateProofSubmitting || !proofFile || participateValidating"
                                     @click="submitPublicProof"
                                 >
-                                    {{ participateProofSubmitting ? 'Enviando...' : 'Enviar comprovante' }}
+                                    {{
+                                        participateProofSubmitting
+                                            ? 'Enviando...'
+                                            : participateValidated?.status === 'rejected'
+                                              ? 'Enviar novo comprovante'
+                                              : 'Enviar comprovante'
+                                    }}
                                 </button>
                             </template>
                         </div>

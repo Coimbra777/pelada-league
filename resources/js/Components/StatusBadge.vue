@@ -1,27 +1,40 @@
 <script setup>
-defineProps({
+import { getChargeStatusBadgeUx } from '../constants/chargeStatusUx.js';
+
+const props = defineProps({
     status: { type: String, required: true },
+    /** Cobrança: 'admin' = painel do responsável (rótulos Aguardando envio / Em análise / …). */
+    chargePerspective: {
+        type: String,
+        default: 'participant',
+        validator: (v) => ['participant', 'admin'].includes(v),
+    },
 });
 
-const statusConfig = {
-    pending: { class: 'bg-red-100 text-red-800', label: 'Nao pagou', emoji: '\u{1F534}' },
-    proof_sent: { class: 'bg-yellow-100 text-yellow-800', label: 'Aguardando validacao', emoji: '\u{1F7E1}' },
-    validated: { class: 'bg-green-100 text-green-800', label: 'Pago', emoji: '\u{1F7E2}' },
-    rejected: { class: 'bg-orange-100 text-orange-800', label: 'Rejeitado', emoji: '\u{26A0}\u{FE0F}' },
-       open: { class: 'bg-yellow-100 text-yellow-800', label: 'Aberta', emoji: '' },
-    closed: { class: 'bg-emerald-100 text-emerald-900', label: 'Finalizada', emoji: '' },
+const CHARGE_KEYS = new Set(['pending', 'proof_sent', 'validated', 'rejected']);
+
+/** Despesa (Expense), não cobrança */
+const expenseStatusConfig = {
+    open: { class: 'bg-sky-50 text-sky-900 ring-1 ring-inset ring-sky-200', label: 'Aberta' },
+    closed: { class: 'bg-emerald-50 text-emerald-900 ring-1 ring-inset ring-emerald-200', label: 'Finalizada' },
 };
 
 function getConfig(status) {
-    return statusConfig[status] || { class: 'bg-gray-100 text-gray-800', label: status, emoji: '' };
+    if (CHARGE_KEYS.has(status)) {
+        const { label, class: cls } = getChargeStatusBadgeUx(status, props.chargePerspective);
+        return { class: cls, label };
+    }
+    if (expenseStatusConfig[status]) {
+        return expenseStatusConfig[status];
+    }
+    return { class: 'bg-gray-100 text-gray-800 ring-1 ring-inset ring-gray-200', label: 'Situação em andamento' };
 }
 </script>
 
 <template>
     <span
-        :class="['inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium', getConfig(status).class]"
+        :class="['inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium', getConfig(status).class]"
     >
-        <span v-if="getConfig(status).emoji" aria-hidden="true">{{ getConfig(status).emoji }}</span>
         {{ getConfig(status).label }}
     </span>
 </template>

@@ -12,10 +12,10 @@ class ApiWhatsappHelper
         $apiUrl = config('services.whatsapp.api_url');
 
         if (empty($apiUrl)) {
-            Log::info('WhatsApp stub: mensagem para {phone}', [
-                'phone' => $phone,
-                'message' => $message,
-            ]);
+            // Log::info('WhatsApp stub: mensagem para {phone}', [
+            //     'phone' => $phone,
+            //     'message' => $message,
+            // ]);
 
             return false;
         }
@@ -36,18 +36,18 @@ class ApiWhatsappHelper
             ]);
 
             if ($response->successful()) {
-                Log::info('WhatsApp: mensagem enviada', [
-                    'phone' => substr($phone, 0, -4) . '****',
-                ]);
+                // Log::info('WhatsApp: mensagem enviada', [
+                //     'phone' => substr($phone, 0, -4) . '****',
+                // ]);
 
                 return true;
             }
 
-            Log::error('WhatsApp: falha no envio', [
-                'phone' => substr($phone, 0, -4) . '****',
-                'status' => $response->status(),
-                'body' => $response->body(),
-            ]);
+            // Log::error('WhatsApp: falha no envio', [
+            //     'phone' => substr($phone, 0, -4) . '****',
+            //     'status' => $response->status(),
+            //     'body' => $response->body(),
+            // ]);
 
             return false;
         } catch (\Illuminate\Http\Client\ConnectionException $e) {
