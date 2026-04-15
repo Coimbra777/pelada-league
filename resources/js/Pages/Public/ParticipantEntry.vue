@@ -4,6 +4,7 @@ import { Head } from '@inertiajs/vue3';
 import { api } from '../../Services/api.js';
 import { useToast } from '../../Composables/useToast.js';
 import { useClipboard } from '../../Composables/useClipboard.js';
+import { useDebouncedParticipantValidation } from '../../Composables/useDebouncedParticipantValidation.js';
 import { formatPhoneBr } from '../../Composables/useInputMasks.js';
 import ParticipantLayout from '../../Layouts/ParticipantLayout.vue';
 import Button from '../../Components/Button.vue';
@@ -28,13 +29,16 @@ const file = ref(null);
 const fileInput = ref(null);
 const fieldErrors = ref({});
 
-const validating = ref(false);
 const submittingProof = ref(false);
 
-/** Resposta 200 de validate-participant */
-const validated = ref(null);
-
 const isExpenseClosed = computed(() => expense.value?.status === 'closed');
+
+const { validated, validationLoading, validationError } = useDebouncedParticipantValidation(
+    () => props.hash,
+    name,
+    phone,
+    () => isExpenseClosed.value,
+);
 
 function formatBrl(value) {
     return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -50,14 +54,13 @@ const qrSrc = computed(() => {
 
 const phoneDigits = computed(() => phone.value.replace(/\D/g, ''));
 
-const canValidate = computed(() => {
-    return (
+/** Nome e telefone minimos para buscar (debounce roda depois) */
+const qualificationMet = computed(
+    () =>
         name.value.trim().length > 0
         && phoneDigits.value.length >= 10
-        && !validating.value
-        && !isExpenseClosed.value
-    );
-});
+        && !isExpenseClosed.value,
+);
 
 const canSubmitProof = computed(() => {
     return (
@@ -65,6 +68,7 @@ const canSubmitProof = computed(() => {
         && !!file.value
         && !submittingProof.value
         && !isExpenseClosed.value
+        && !validationLoading.value
     );
 });
 
@@ -87,61 +91,22 @@ onMounted(async () => {
     }
 });
 
-function clearValidation() {
-    validated.value = null;
+function onNameInput() {
+    fieldErrors.value = {};
     file.value = null;
     if (fileInput.value) fileInput.value.value = '';
 }
 
-function onNameInput() {
-    clearValidation();
-}
-
 function onPhoneInput(ev) {
     phone.value = formatPhoneBr(ev.target.value);
-    clearValidation();
+    fieldErrors.value = {};
+    file.value = null;
+    if (fileInput.value) fileInput.value.value = '';
 }
 
 function onFileChange(ev) {
     file.value = ev.target.files?.[0] ?? null;
     fieldErrors.value = {};
-}
-
-async function validateParticipant() {
-    if (isExpenseClosed.value) return;
-    fieldErrors.value = {};
-    const trimmedName = name.value.trim();
-    const digits = phoneDigits.value;
-
-    if (!trimmedName) {
-        fieldErrors.value.name = 'Informe seu nome.';
-        return;
-    }
-    if (digits.length < 10) {
-        fieldErrors.value.phone = 'Telefone invalido.';
-        return;
-    }
-
-    validating.value = true;
-    try {
-        const data = await api.post(`/public/expenses/${props.hash}/validate-participant`, {
-            name: trimmedName,
-            phone: digits,
-        });
-        validated.value = {
-            status: data.status,
-            message: data.message,
-            rejection_reason: data.rejection_reason ?? null,
-            can_submit_proof: !!data.can_submit_proof,
-        };
-        toast.success('Dados confirmados.');
-    } catch (err) {
-        validated.value = null;
-        const msg = err.data?.message || 'Nao foi possivel validar.';
-        toast.error(msg);
-    } finally {
-        validating.value = false;
-    }
 }
 
 async function submitProof() {
@@ -181,6 +146,7 @@ async function submitProof() {
             rejection_reason: data.rejection_reason ?? null,
             can_submit_proof: false,
         };
+        validationError.value = null;
         toast.success(data.message || 'Comprovante enviado.');
         file.value = null;
         if (fileInput.value) fileInput.value.value = '';
@@ -193,6 +159,9 @@ async function submitProof() {
                 rejection_reason: d.rejection_reason ?? null,
                 can_submit_proof: ['pending', 'rejected'].includes(d.status),
             };
+            validationError.value = null;
+        } else {
+            validationError.value = d.message || 'Nao foi possivel enviar.';
         }
         toast.error(d.message || 'Nao foi possivel enviar.');
     } finally {
@@ -264,7 +233,7 @@ async function submitProof() {
         <section v-else class="space-y-4">
             <h2 class="text-base font-semibold text-gray-900">Participar</h2>
             <p class="text-xs text-gray-600">
-                Informe <strong>exatamente</strong> o nome e o telefone cadastrados pelo responsavel (telefone pode ser digitado com mascara).
+                Informe <strong>exatamente</strong> o nome e o telefone cadastrados pelo responsavel (telefone pode ser digitado com mascara). A verificacao ocorre automaticamente.
             </p>
 
             <div>
@@ -297,19 +266,23 @@ async function submitProof() {
                 <p v-if="fieldErrors.phone" class="text-sm text-red-600 mt-1">{{ fieldErrors.phone }}</p>
             </div>
 
-            <Button
-                type="button"
-                variant="secondary"
-                class="w-full min-h-[48px] text-base font-semibold"
-                :disabled="!canValidate"
-                :loading="validating"
-                @click="validateParticipant"
+            <div
+                v-if="qualificationMet && validationLoading"
+                class="flex items-center gap-2 rounded-xl border border-indigo-100 bg-indigo-50/80 px-3 py-3 text-sm text-indigo-900"
             >
-                Validar meus dados
-            </Button>
+                <span class="h-4 w-4 shrink-0 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" aria-hidden="true" />
+                <span>Verificando seus dados...</span>
+            </div>
 
             <div
-                v-if="validated"
+                v-else-if="qualificationMet && validationError"
+                class="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-800"
+            >
+                {{ validationError }}
+            </div>
+
+            <div
+                v-if="validated && !validationLoading"
                 class="rounded-xl border border-stone-200 bg-stone-50 px-3 py-3 text-sm space-y-2"
             >
                 <div class="flex flex-wrap items-center gap-2">
@@ -322,7 +295,7 @@ async function submitProof() {
                 </p>
             </div>
 
-            <template v-if="validated?.can_submit_proof">
+            <template v-if="validated?.can_submit_proof && !validationLoading">
                 <div>
                     <label for="pe-file" class="block text-sm font-medium text-gray-700 mb-1.5">Comprovante</label>
                     <input

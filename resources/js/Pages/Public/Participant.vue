@@ -5,6 +5,7 @@ import { usePublicExpenseStore } from '../../Stores/publicExpense.js';
 import { useToast } from '../../Composables/useToast.js';
 import { useClipboard } from '../../Composables/useClipboard.js';
 import { useDateBr } from '../../Composables/useDateBr.js';
+import { useDebouncedParticipantValidation } from '../../Composables/useDebouncedParticipantValidation.js';
 import { formatPhoneBr } from '../../Composables/useInputMasks.js';
 import PublicLayout from '../../Layouts/PublicLayout.vue';
 import Card from '../../Components/Card.vue';
@@ -65,9 +66,26 @@ const participantPhone = ref('');
 const proofFile = ref(null);
 const proofFileInput = ref(null);
 const participateErrors = ref({});
-const participateValidating = ref(false);
 const participateProofSubmitting = ref(false);
-const participateValidated = ref(null);
+
+const {
+    validated: participateValidated,
+    validationLoading: participateValidating,
+    validationError: participateValidationError,
+} = useDebouncedParticipantValidation(
+    () => props.hash,
+    participantName,
+    participantPhone,
+    () => !isGroupMode.value || isGroupExpenseClosed.value,
+);
+
+const groupQualificationMet = computed(
+    () =>
+        isGroupMode.value
+        && !isGroupExpenseClosed.value
+        && participantName.value.trim().length > 0
+        && participantPhone.value.replace(/\D/g, '').length >= 10,
+);
 
 const headerExpense = computed(() => {
     const e = store.expense;
@@ -94,50 +112,18 @@ function onProofFileChange(ev) {
     participateErrors.value = { ...participateErrors.value, proof: null };
 }
 
-function clearGroupParticipateValidation() {
-    participateValidated.value = null;
+function clearGroupProofOnly() {
     proofFile.value = null;
     if (proofFileInput.value) proofFileInput.value.value = '';
 }
 
 function onGroupNameInput() {
-    clearGroupParticipateValidation();
+    clearGroupProofOnly();
 }
 
 function onGroupPhoneInput(ev) {
     participantPhone.value = formatPhoneBr(ev.target.value);
-    clearGroupParticipateValidation();
-}
-
-async function validateGroupParticipant() {
-    participateErrors.value = {};
-    const name = participantName.value.trim();
-    const phoneDigits = participantPhone.value.replace(/\D/g, '');
-    if (!name) {
-        participateErrors.value.name = 'Informe seu nome.';
-        return;
-    }
-    if (phoneDigits.length < 10) {
-        participateErrors.value.phone = 'Informe um telefone valido (min. 10 digitos).';
-        return;
-    }
-
-    participateValidating.value = true;
-    try {
-        const data = await store.validateParticipant(props.hash, { name, phone: phoneDigits });
-        participateValidated.value = {
-            status: data.status,
-            message: data.message,
-            rejection_reason: data.rejection_reason ?? null,
-            can_submit_proof: !!data.can_submit_proof,
-        };
-        toast.success('Dados confirmados.');
-    } catch (err) {
-        participateValidated.value = null;
-        toast.error(err.data?.message || store.error || 'Nao foi possivel validar.');
-    } finally {
-        participateValidating.value = false;
-    }
+    clearGroupProofOnly();
 }
 
 async function submitGroupProof() {
@@ -157,6 +143,13 @@ async function submitGroupProof() {
             phone: phoneDigits,
             file: proofFile.value,
         });
+        participateValidated.value = {
+            status: data.status,
+            message: data.message,
+            rejection_reason: data.rejection_reason ?? null,
+            can_submit_proof: false,
+        };
+        participateValidationError.value = null;
         toast.success(data.message || 'Comprovante enviado.');
         showParticipateForm.value = false;
         participantName.value = '';
@@ -174,6 +167,9 @@ async function submitGroupProof() {
                 rejection_reason: d.rejection_reason ?? null,
                 can_submit_proof: ['pending', 'rejected'].includes(d.status),
             };
+            participateValidationError.value = null;
+        } else {
+            participateValidationError.value = d.message || store.error || 'Nao foi possivel enviar.';
         }
         toast.error(d.message || store.error || 'Nao foi possivel enviar.');
     } finally {
@@ -335,16 +331,21 @@ async function copyPublicLinkGroup() {
                                 />
                                 <p v-if="participateErrors.phone" class="text-xs text-red-600 mt-1">{{ participateErrors.phone }}</p>
                             </div>
-                            <button
-                                type="button"
-                                class="w-full min-h-[48px] rounded-xl border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 disabled:opacity-60"
-                                :disabled="participateValidating"
-                                @click="validateGroupParticipant"
-                            >
-                                {{ participateValidating ? 'Validando...' : 'Validar meus dados' }}
-                            </button>
                             <div
-                                v-if="participateValidated"
+                                v-if="groupQualificationMet && participateValidating"
+                                class="flex items-center gap-2 rounded-lg border border-indigo-100 bg-indigo-50/80 px-3 py-2.5 text-sm text-indigo-900"
+                            >
+                                <span class="h-4 w-4 shrink-0 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" aria-hidden="true" />
+                                <span>Verificando seus dados...</span>
+                            </div>
+                            <div
+                                v-else-if="groupQualificationMet && participateValidationError"
+                                class="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800"
+                            >
+                                {{ participateValidationError }}
+                            </div>
+                            <div
+                                v-if="participateValidated && !participateValidating"
                                 class="rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm space-y-2"
                             >
                                 <div class="flex flex-wrap items-center gap-2">
@@ -359,7 +360,7 @@ async function copyPublicLinkGroup() {
                                     {{ participateValidated.rejection_reason }}
                                 </p>
                             </div>
-                            <template v-if="participateValidated?.can_submit_proof">
+                            <template v-if="participateValidated?.can_submit_proof && !participateValidating">
                                 <div>
                                     <label class="block text-xs font-medium text-gray-600 mb-1">Comprovante</label>
                                     <input
@@ -376,7 +377,7 @@ async function copyPublicLinkGroup() {
                                 <button
                                     type="button"
                                     class="w-full min-h-[48px] rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-60"
-                                    :disabled="participateProofSubmitting || !proofFile"
+                                    :disabled="participateProofSubmitting || !proofFile || participateValidating"
                                     @click="submitGroupProof"
                                 >
                                     {{ participateProofSubmitting ? 'Enviando...' : 'Enviar comprovante' }}

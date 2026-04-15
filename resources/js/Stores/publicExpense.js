@@ -118,16 +118,6 @@ export const usePublicExpenseStore = defineStore('publicExpense', {
             return data;
         },
 
-        async validateParticipant(hash, { name, phone }) {
-            this.error = null;
-            try {
-                return await api.post(`/public/expenses/${hash}/validate-participant`, { name, phone });
-            } catch (err) {
-                this.error = err.data?.message || 'Falha ao validar dados.';
-                throw err;
-            }
-        },
-
         async submitProof(hash, { name, phone, file }) {
             this.error = null;
             const formData = new FormData();
