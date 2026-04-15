@@ -85,8 +85,10 @@ class Expense extends Model
         return $this->hasMany(Charge::class);
     }
 
-    private const PAID_STATUSES = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'];
-
+    /**
+     * Atualiza status agregado da despesa com base nas cobranças (fluxo comprovante / validação).
+     * Não altera despesas já encerradas (closed).
+     */
     public function recalculateStatus(): void
     {
         if ($this->status === 'closed') {
@@ -99,16 +101,24 @@ class Expense extends Model
             return;
         }
 
-        $allPaid = $charges->every(fn ($c) => in_array($c->status, self::PAID_STATUSES));
-        $somePaid = $charges->contains(fn ($c) => in_array($c->status, self::PAID_STATUSES));
-        $anyOverdue = $charges->contains(fn ($c) => $c->status === 'OVERDUE');
+        $allValidated = $charges->every(fn ($c) => $c->status === 'validated');
+        $someValidated = $charges->contains(fn ($c) => $c->status === 'validated');
+        $today = now()->startOfDay();
 
-        if ($allPaid) {
-            $newStatus = 'PAID';
-        } elseif ($somePaid) {
-            $newStatus = 'PARTIALLY_PAID';
+        $anyOverdue = $charges->contains(function ($c) use ($today) {
+            if ($c->status === 'validated') {
+                return false;
+            }
+
+            return $c->due_date && $c->due_date->copy()->startOfDay()->lt($today);
+        });
+
+        if ($allValidated) {
+            $newStatus = 'paid';
+        } elseif ($someValidated) {
+            $newStatus = 'partially_paid';
         } elseif ($anyOverdue) {
-            $newStatus = 'OVERDUE';
+            $newStatus = 'overdue';
         } else {
             $newStatus = 'open';
         }

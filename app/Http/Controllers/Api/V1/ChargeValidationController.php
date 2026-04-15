@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\ChargeResource;
 use App\Models\Charge;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ChargeValidationController extends Controller
@@ -26,6 +28,7 @@ class ChargeValidationController extends Controller
         $charge->update([
             'status' => 'validated',
             'paid_at' => now(),
+            'rejection_reason' => null,
         ]);
 
         $expense = $charge->expense;
@@ -33,6 +36,8 @@ class ChargeValidationController extends Controller
             $allValidated = $expense->charges()->where('status', '!=', 'validated')->doesntExist();
             if ($allValidated) {
                 $expense->update(['status' => 'closed']);
+            } else {
+                $expense->recalculateStatus();
             }
         }
 
@@ -41,7 +46,7 @@ class ChargeValidationController extends Controller
         ]);
     }
 
-    public function reject(Charge $charge): JsonResponse
+    public function reject(Request $request, Charge $charge): JsonResponse
     {
         $authCheck = $this->authorizeAdmin($charge);
         if ($authCheck) {
@@ -52,12 +57,22 @@ class ChargeValidationController extends Controller
             return response()->json(['message' => 'Charge must have proof_sent status.'], 422);
         }
 
-        $charge->update(['status' => 'rejected']);
+        $reasonRaw = $request->input('reason');
+        $reason = is_string($reasonRaw) && trim($reasonRaw) !== ''
+            ? Str::limit(trim($reasonRaw), 2000)
+            : null;
+
+        $charge->update([
+            'status' => 'rejected',
+            'rejection_reason' => $reason,
+        ]);
 
         $latestProof = $charge->latestProof();
         if ($latestProof) {
             $latestProof->update(['status' => 'rejected']);
         }
+
+        $charge->expense?->recalculateStatus();
 
         return response()->json([
             'charge' => new ChargeResource($charge->load('teamMember')),
@@ -72,7 +87,7 @@ class ChargeValidationController extends Controller
         }
 
         $proof = $charge->latestProof();
-        if (!$proof) {
+        if (! $proof) {
             return response()->json(['message' => 'No proof found.'], 404);
         }
 
@@ -85,12 +100,12 @@ class ChargeValidationController extends Controller
         $user = Auth::user();
 
         $expense = $charge->expense;
-        if (!$expense) {
+        if (! $expense) {
             return response()->json(['message' => 'Not found.'], 404);
         }
 
         $membership = $expense->team->members()->where('user_id', $user->id)->first();
-        if (!$membership || $membership->role !== 'admin') {
+        if (! $membership || $membership->role !== 'admin') {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 

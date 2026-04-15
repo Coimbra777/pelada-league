@@ -47,11 +47,4 @@ class TeamMemberFactory extends Factory
             'role' => 'admin',
         ]);
     }
-
-    public function withAsaas(): static
-    {
-        return $this->state(fn (array $attributes) => [
-            'asaas_customer_id' => 'cus_' . fake()->unique()->uuid(),
-        ]);
-    }
 }

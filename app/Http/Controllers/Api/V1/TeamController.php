@@ -56,7 +56,7 @@ class TeamController extends Controller
         /** @var \App\Models\User $user */
         $user = Auth::user();
 
-        if (!$team->members()->where('user_id', $user->id)->exists()) {
+        if (! $team->members()->where('user_id', $user->id)->exists()) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -73,14 +73,14 @@ class TeamController extends Controller
         /** @var \App\Models\User $user */
         $user = Auth::user();
 
-        if (!$team->members()->where('user_id', $user->id)->exists()) {
+        if (! $team->members()->where('user_id', $user->id)->exists()) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
         $expenseIds = $team->expenses()->pluck('id');
         $charges = Charge::whereIn('expense_id', $expenseIds)->get();
 
-        $paidStatuses = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH', 'validated'];
+        $paidStatuses = ['validated'];
 
         $totalOpen = $charges->reject(fn ($c) => in_array($c->status, $paidStatuses))->sum('amount');
         $totalPaid = $charges->filter(fn ($c) => in_array($c->status, $paidStatuses))->sum('amount');

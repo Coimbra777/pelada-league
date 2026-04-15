@@ -30,7 +30,7 @@ class ExpenseTest extends TestCase
             TeamMember::create([
                 'team_id' => $team->id,
                 'name' => "Member {$i}",
-                'phone' => "1100000000" . ($i + 1),
+                'phone' => '1100000000'.($i + 1),
                 'role' => 'member',
             ]);
         }
@@ -148,7 +148,6 @@ class ExpenseTest extends TestCase
         $charges = \App\Models\Charge::all();
         foreach ($charges as $charge) {
             $this->assertEquals('pending', $charge->status);
-            $this->assertNull($charge->asaas_charge_id);
         }
     }
 

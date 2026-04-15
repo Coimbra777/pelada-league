@@ -18,11 +18,8 @@ class Charge extends Model
         'description',
         'amount',
         'due_date',
-        'asaas_charge_id',
         'status',
-        'pix_qr_code',
-        'pix_copy_paste',
-        'payment_link',
+        'rejection_reason',
         'paid_at',
     ];
 

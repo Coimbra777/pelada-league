@@ -112,7 +112,7 @@ class AuthTest extends TestCase
 
         $this->assertDatabaseCount('personal_access_tokens', 1);
 
-        $response = $this->withHeader('Authorization', 'Bearer ' . $token)
+        $response = $this->withHeader('Authorization', 'Bearer '.$token)
             ->postJson('/api/v1/auth/logout');
 
         $response->assertOk()
@@ -121,7 +121,7 @@ class AuthTest extends TestCase
         $this->assertDatabaseCount('personal_access_tokens', 0);
     }
 
-    public function test_register_does_not_call_asaas_or_set_customer_id(): void
+    public function test_register_persists_profile_fields(): void
     {
         Http::fake();
 
@@ -138,13 +138,13 @@ class AuthTest extends TestCase
 
         $this->assertDatabaseHas('users', [
             'email' => 'john@example.com',
-            'asaas_customer_id' => null,
+            'phone' => '11999999999',
         ]);
 
         Http::assertNothingSent();
     }
 
-    public function test_register_succeeds_without_asaas_integration(): void
+    public function test_register_minimal_succeeds(): void
     {
         Http::fake();
 
@@ -160,22 +160,7 @@ class AuthTest extends TestCase
 
         $this->assertDatabaseHas('users', [
             'email' => 'john@example.com',
-            'asaas_customer_id' => null,
         ]);
-
-        Http::assertNothingSent();
-    }
-
-    public function test_asaas_customer_is_not_created_when_already_exists(): void
-    {
-        Http::fake();
-
-        $user = User::factory()->create(['asaas_customer_id' => 'cus_existing']);
-
-        $service = app(\App\Services\Asaas\AsaasCustomerService::class);
-        $customerId = $service->create($user);
-
-        $this->assertEquals('cus_existing', $customerId);
 
         Http::assertNothingSent();
     }

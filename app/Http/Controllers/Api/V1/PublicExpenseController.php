@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Http\Controllers\Concerns\AuthorizesPublicExpense;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\AddPublicExpenseParticipantsRequest;
 use App\Http\Requests\Api\V1\IdentifyMemberRequest;
@@ -28,6 +29,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PublicExpenseController extends Controller
 {
+    use AuthorizesPublicExpense;
+
     public function store(StorePublicExpenseRequest $request, PublicExpenseCreatorService $creator): JsonResponse
     {
         $data = $request->validated();
@@ -92,7 +95,7 @@ class PublicExpenseController extends Controller
         ]);
     }
 
-    public function updateExpense(UpdatePublicExpenseRequest $request, string $hash): JsonResponse
+    public function updateExpense(UpdatePublicExpenseRequest $request, string $hash, ExpenseService $expenseService): JsonResponse
     {
         $expense = Expense::where('public_hash', $hash)->firstOrFail();
 
@@ -106,7 +109,16 @@ class PublicExpenseController extends Controller
         }
 
         $data = $request->validated();
+        $oldTotal = (float) $expense->total_amount;
         $totalAmount = (float) $data['amount'];
+        $totalChanged = abs($totalAmount - $oldTotal) > 0.001;
+
+        if ($totalChanged && $expense->charges()->where('status', '!=', 'pending')->exists()) {
+            return response()->json([
+                'message' => 'Nao e possivel alterar o valor total enquanto houver cobranca enviada, validada ou rejeitada.',
+            ], 422);
+        }
+
         $chargeCount = $expense->charges()->count();
         $amountPerMember = $chargeCount > 0
             ? floor($totalAmount / $chargeCount * 100) / 100
@@ -123,6 +135,16 @@ class PublicExpenseController extends Controller
             $payload['pix_qr_code'] = $data['pix_qr_code'];
         }
         $expense->update($payload);
+        $expense->refresh();
+
+        if ($totalChanged) {
+            $expenseService->redistributeChargeAmounts($expense);
+        } else {
+            $expense->charges()->update([
+                'description' => $expense->description,
+                'due_date' => $expense->due_date,
+            ]);
+        }
 
         $expense->load(['charges.teamMember', 'charges.paymentProofs']);
 
@@ -464,7 +486,10 @@ class PublicExpenseController extends Controller
         $charge->update([
             'status' => 'validated',
             'paid_at' => now(),
+            'rejection_reason' => null,
         ]);
+
+        $expense->recalculateStatus();
 
         $charge->load('teamMember');
 
@@ -504,12 +529,22 @@ class PublicExpenseController extends Controller
             return response()->json(['message' => $message], 422);
         }
 
-        $charge->update(['status' => 'rejected']);
+        $reasonRaw = $request->input('reason');
+        $reason = is_string($reasonRaw) && trim($reasonRaw) !== ''
+            ? Str::limit(trim($reasonRaw), 2000)
+            : null;
+
+        $charge->update([
+            'status' => 'rejected',
+            'rejection_reason' => $reason,
+        ]);
 
         $latestProof = $charge->latestProof();
         if ($latestProof) {
             $latestProof->update(['status' => 'rejected']);
         }
+
+        $charge->expense?->recalculateStatus();
 
         $charge->load('teamMember');
 
@@ -625,45 +660,5 @@ class PublicExpenseController extends Controller
             'due_date' => $expense->due_date,
             'status' => 'pending',
         ]);
-    }
-
-    private function authorizeManage(Request $request, ?Expense $expense): Expense|JsonResponse
-    {
-        if (! $expense || ! $expense->public_hash) {
-            return response()->json(['message' => 'Not found.'], 404);
-        }
-
-        return $this->authorizeManageToken($request, $expense);
-    }
-
-    private function authorizeManageToken(Request $request, Expense $expense): Expense|JsonResponse
-    {
-        $token = $this->resolveManageToken($request);
-        if (! $token || ! hash_equals((string) $expense->manage_token, (string) $token)) {
-            return response()->json(['message' => 'Forbidden.'], 403);
-        }
-
-        return $expense;
-    }
-
-    private function rejectIfClosed(Expense $expense): ?JsonResponse
-    {
-        if ($expense->status === 'closed') {
-            return response()->json([
-                'message' => 'Esta despesa foi finalizada e nao aceita mais alteracoes.',
-            ], 422);
-        }
-
-        return null;
-    }
-
-    private function resolveManageToken(Request $request): ?string
-    {
-        $t = $request->input('manage_token')
-            ?? $request->query('manage_token')
-            ?? $request->query('manage')
-            ?? $request->header('X-Manage-Token');
-
-        return $t !== null && $t !== '' ? (string) $t : null;
     }
 }

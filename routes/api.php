@@ -1,13 +1,11 @@
 <?php
 
 use App\Http\Controllers\Api\V1\Auth\AuthController;
-use App\Http\Controllers\Api\V1\ChargeController;
 use App\Http\Controllers\Api\V1\ChargeValidationController;
 use App\Http\Controllers\Api\V1\ExpenseController;
 use App\Http\Controllers\Api\V1\PublicExpenseController;
 use App\Http\Controllers\Api\V1\TeamController;
 use App\Http\Controllers\Api\V1\TeamMemberController;
-use App\Http\Controllers\Api\V1\WebhookController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/public/expenses', [PublicExpenseController::class, 'store']);
@@ -41,9 +39,6 @@ Route::prefix('v1')->group(function () {
     });
 
     Route::middleware('auth:sanctum')->group(function () {
-        Route::post('/charges', [ChargeController::class, 'store']);
-        Route::post('/charges/{charge}/sync', [ChargeController::class, 'sync']);
-
         Route::get('/expenses/{expense}', [ExpenseController::class, 'showDirect']);
         Route::get('/expenses/{expense}/members', [ExpenseController::class, 'members']);
 
@@ -66,10 +61,6 @@ Route::prefix('v1')->group(function () {
             Route::patch('/{team}/expenses/{expense}', [ExpenseController::class, 'update']);
             Route::post('/{team}/expenses/{expense}/participants', [ExpenseController::class, 'addParticipants']);
         });
-    });
-
-    Route::prefix('webhooks')->middleware('throttle:webhook')->group(function () {
-        Route::post('/asaas', [WebhookController::class, 'asaas']);
     });
 
 });

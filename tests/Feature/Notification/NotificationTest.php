@@ -9,7 +9,6 @@ use App\Services\NotificationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 class NotificationTest extends TestCase
@@ -22,13 +21,13 @@ class NotificationTest extends TestCase
             ->once()
             ->withArgs(fn ($msg) => str_contains($msg, 'WhatsApp stub'));
 
-        $helper = new ApiWhatsappHelper();
+        $helper = new ApiWhatsappHelper;
         $result = $helper->send('11999999999', 'Test message');
 
         $this->assertFalse($result);
     }
 
-    public function test_notification_attempts_whatsapp_first(): void
+    public function test_notification_sends_whatsapp_when_configured(): void
     {
         $whatsappMock = $this->createMock(ApiWhatsappHelper::class);
         $whatsappMock->expects($this->once())
@@ -43,35 +42,10 @@ class NotificationTest extends TestCase
             'user_id' => null,
         ]);
 
-        Mail::shouldReceive('raw')->never();
-
         $service->sendChargeNotification($member, $charge);
     }
 
-    public function test_notification_falls_back_to_email(): void
-    {
-        $whatsappMock = $this->createMock(ApiWhatsappHelper::class);
-        $whatsappMock->expects($this->once())
-            ->method('send')
-            ->willReturn(false);
-
-        $service = new NotificationService($whatsappMock);
-
-        $member = TeamMember::factory()->create([
-            'phone' => '11999999999',
-            'email' => 'test@example.com',
-        ]);
-        $charge = Charge::factory()->create([
-            'team_member_id' => $member->id,
-            'user_id' => null,
-        ]);
-
-        Mail::shouldReceive('raw')->once();
-
-        $service->sendChargeNotification($member, $charge);
-    }
-
-    public function test_notification_logs_when_no_channel_available(): void
+    public function test_notification_logs_when_phone_missing(): void
     {
         $whatsappMock = $this->createMock(ApiWhatsappHelper::class);
         $whatsappMock->expects($this->never())
@@ -81,7 +55,6 @@ class NotificationTest extends TestCase
 
         $member = TeamMember::factory()->create([
             'phone' => '',
-            'email' => null,
         ]);
         $charge = Charge::factory()->create([
             'team_member_id' => $member->id,
@@ -90,7 +63,29 @@ class NotificationTest extends TestCase
 
         Log::shouldReceive('info')
             ->once()
-            ->withArgs(fn ($msg) => str_contains($msg, 'No notification channel'));
+            ->withArgs(fn ($msg) => str_contains($msg, 'missing phone'));
+
+        $service->sendChargeNotification($member, $charge);
+    }
+
+    public function test_notification_logs_when_whatsapp_fails(): void
+    {
+        $whatsappMock = $this->createMock(ApiWhatsappHelper::class);
+        $whatsappMock->expects($this->once())
+            ->method('send')
+            ->willReturn(false);
+
+        $service = new NotificationService($whatsappMock);
+
+        $member = TeamMember::factory()->create(['phone' => '11999999999']);
+        $charge = Charge::factory()->create([
+            'team_member_id' => $member->id,
+            'user_id' => null,
+        ]);
+
+        Log::shouldReceive('info')
+            ->once()
+            ->withArgs(fn ($msg) => str_contains($msg, 'not delivered'));
 
         $service->sendChargeNotification($member, $charge);
     }
@@ -104,7 +99,7 @@ class NotificationTest extends TestCase
             'api.whatsapp.test/*' => Http::response(['success' => true], 200),
         ]);
 
-        $helper = new ApiWhatsappHelper();
+        $helper = new ApiWhatsappHelper;
         $result = $helper->send('11999999999', 'Hello test');
 
         $this->assertTrue($result);
@@ -125,7 +120,7 @@ class NotificationTest extends TestCase
             'api.whatsapp.test/*' => Http::response(['error' => 'Internal'], 500),
         ]);
 
-        $helper = new ApiWhatsappHelper();
+        $helper = new ApiWhatsappHelper;
         $result = $helper->send('11999999999', 'Hello');
 
         $this->assertFalse($result);
@@ -139,7 +134,7 @@ class NotificationTest extends TestCase
             'api.whatsapp.test/*' => Http::response(['error' => 'Bad request'], 422),
         ]);
 
-        $helper = new ApiWhatsappHelper();
+        $helper = new ApiWhatsappHelper;
         $result = $helper->send('11999999999', 'Hello');
 
         $this->assertFalse($result);

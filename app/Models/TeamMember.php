@@ -20,7 +20,6 @@ class TeamMember extends Model
         'phone',
         'email',
         'role',
-        'asaas_customer_id',
     ];
 
     protected static function booted(): void
