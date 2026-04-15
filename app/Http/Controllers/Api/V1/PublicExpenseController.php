@@ -19,6 +19,7 @@ use App\Models\TeamMember;
 use App\Services\ExpenseService;
 use App\Services\PaymentProofService;
 use App\Services\PublicExpenseCreatorService;
+use App\Support\ChargeStatusTransition;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -115,7 +116,7 @@ class PublicExpenseController extends Controller
 
         if ($totalChanged && $expense->charges()->where('status', '!=', 'pending')->exists()) {
             return response()->json([
-                'message' => 'Nao e possivel alterar o valor total enquanto houver cobranca enviada, validada ou rejeitada.',
+                'message' => 'Nao e possivel alterar o valor total enquanto houver cobranca com status diferente de pendente.',
             ], 422);
         }
 
@@ -232,7 +233,7 @@ class PublicExpenseController extends Controller
         $validated = $request->validated();
 
         try {
-            $charge = $this->resolveOrCreateParticipantCharge($expense, $validated['name'], $validated['phone']);
+            $charge = $this->findParticipantChargeForParticipation($expense, $validated['name'], $validated['phone']);
         } catch (\DomainException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
@@ -250,6 +251,10 @@ class PublicExpenseController extends Controller
         } catch (\DomainException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
+
+        $charge->refresh();
+
+        ChargeStatusTransition::assertTransition($charge->status, 'proof_sent');
 
         $charge->update(['status' => 'proof_sent']);
 
@@ -368,26 +373,9 @@ class PublicExpenseController extends Controller
         }
 
         if ($charges->isEmpty()) {
-            $phoneStored = $phoneDigits !== '' ? $phoneDigits : $phoneRaw;
-            $member = TeamMember::create([
-                'team_id' => $expense->team_id,
-                'user_id' => null,
-                'name' => $name,
-                'phone' => $phoneStored,
-                'role' => 'member',
-            ]);
-
-            $charge = Charge::create([
-                'team_member_id' => $member->id,
-                'expense_id' => $expense->id,
-                'description' => $expense->description,
-                'amount' => $expense->amount_per_member ?? 0,
-                'due_date' => $expense->due_date,
-                'status' => 'pending',
-            ]);
-
-            $charge->load('teamMember');
-            $charges = collect([$charge]);
+            return response()->json([
+                'message' => 'Participante nao encontrado nesta despesa.',
+            ], 422);
         }
 
         $first = $charges->first();
@@ -447,9 +435,13 @@ class PublicExpenseController extends Controller
             return response()->json(['message' => 'Aguardando aprovacao do responsavel.'], 422);
         }
 
-        if (! in_array($charge->status, ['pending', 'rejected'], true)) {
-            return response()->json(['message' => 'Charge already processed.'], 422);
+        if ($charge->status !== 'pending') {
+            return response()->json([
+                'message' => 'Envie um novo comprovante antes de marcar como pago (cobranca nao esta pendente).',
+            ], 422);
         }
+
+        ChargeStatusTransition::assertTransition($charge->status, 'proof_sent');
 
         $charge->update(['status' => 'proof_sent']);
 
@@ -483,13 +475,15 @@ class PublicExpenseController extends Controller
             return response()->json(['message' => $message], 422);
         }
 
+        ChargeStatusTransition::assertTransition($charge->status, 'validated');
+
         $charge->update([
             'status' => 'validated',
             'paid_at' => now(),
             'rejection_reason' => null,
         ]);
 
-        $expense->recalculateStatus();
+        $expense->syncClosedStateFromCharges();
 
         $charge->load('teamMember');
 
@@ -529,6 +523,8 @@ class PublicExpenseController extends Controller
             return response()->json(['message' => $message], 422);
         }
 
+        ChargeStatusTransition::assertTransition($charge->status, 'rejected');
+
         $reasonRaw = $request->input('reason');
         $reason = is_string($reasonRaw) && trim($reasonRaw) !== ''
             ? Str::limit(trim($reasonRaw), 2000)
@@ -543,8 +539,6 @@ class PublicExpenseController extends Controller
         if ($latestProof) {
             $latestProof->update(['status' => 'rejected']);
         }
-
-        $charge->expense?->recalculateStatus();
 
         $charge->load('teamMember');
 
@@ -614,7 +608,7 @@ class PublicExpenseController extends Controller
         ]);
     }
 
-    private function resolveOrCreateParticipantCharge(Expense $expense, string $name, string $phone): Charge
+    private function findParticipantChargeForParticipation(Expense $expense, string $name, string $phone): Charge
     {
         $normalized = preg_replace('/\D+/', '', $phone) ?? '';
 
@@ -627,38 +621,18 @@ class PublicExpenseController extends Controller
             ->get()
             ->first(fn (TeamMember $m) => preg_replace('/\D+/', '', (string) $m->phone) === $normalized);
 
-        if ($member) {
-            $member->update(['name' => $name]);
-            $charge = $expense->charges()->where('team_member_id', $member->id)->first();
-            if (! $charge) {
-                $charge = Charge::create([
-                    'team_member_id' => $member->id,
-                    'expense_id' => $expense->id,
-                    'description' => $expense->description,
-                    'amount' => $expense->amount_per_member ?? 0,
-                    'due_date' => $expense->due_date,
-                    'status' => 'pending',
-                ]);
-            }
-
-            return $charge;
+        if (! $member) {
+            throw new \DomainException('Participante nao encontrado nesta despesa.');
         }
 
-        $member = TeamMember::create([
-            'team_id' => $expense->team_id,
-            'user_id' => null,
-            'name' => $name,
-            'phone' => $normalized,
-            'role' => 'member',
-        ]);
+        $member->update(['name' => $name]);
 
-        return Charge::create([
-            'team_member_id' => $member->id,
-            'expense_id' => $expense->id,
-            'description' => $expense->description,
-            'amount' => $expense->amount_per_member ?? 0,
-            'due_date' => $expense->due_date,
-            'status' => 'pending',
-        ]);
+        $charge = $expense->charges()->where('team_member_id', $member->id)->first();
+
+        if (! $charge) {
+            throw new \DomainException('Participante nao encontrado nesta despesa.');
+        }
+
+        return $charge;
     }
 }

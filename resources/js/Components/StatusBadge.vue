@@ -8,10 +8,7 @@ const statusConfig = {
     proof_sent: { class: 'bg-yellow-100 text-yellow-800', label: 'Aguardando validacao', emoji: '\u{1F7E1}' },
     validated: { class: 'bg-green-100 text-green-800', label: 'Pago', emoji: '\u{1F7E2}' },
     rejected: { class: 'bg-orange-100 text-orange-800', label: 'Rejeitado', emoji: '\u{26A0}\u{FE0F}' },
-    open: { class: 'bg-yellow-100 text-yellow-800', label: 'Aberta', emoji: '' },
-    paid: { class: 'bg-green-100 text-green-800', label: 'Quitada', emoji: '' },
-    partially_paid: { class: 'bg-amber-100 text-amber-900', label: 'Parcialmente quitada', emoji: '' },
-    overdue: { class: 'bg-red-100 text-red-900', label: 'Em atraso', emoji: '' },
+       open: { class: 'bg-yellow-100 text-yellow-800', label: 'Aberta', emoji: '' },
     closed: { class: 'bg-emerald-100 text-emerald-900', label: 'Finalizada', emoji: '' },
 };
 

@@ -183,32 +183,20 @@ class PublicExpenseTest extends TestCase
             ->assertJsonPath('members.0.name', 'Maria Silva');
     }
 
-    public function test_identify_auto_creates_new_member(): void
+    public function test_identify_returns_422_when_participant_not_found(): void
     {
-        [$expense] = $this->createExpenseWithCharges();
+        $this->createExpenseWithCharges();
 
         $response = $this->postJson('/api/v1/public/expenses/test-hash-123/identify', [
             'name' => 'Pedro Novo',
             'phone' => '11999888777',
         ]);
 
-        $response->assertOk()
-            ->assertJsonCount(1, 'members')
-            ->assertJsonPath('members.0.name', 'Pedro Novo')
-            ->assertJsonPath('members.0.phone', '11999888777')
-            ->assertJsonPath('members.0.amount', '50.00')
-            ->assertJsonPath('members.0.status', 'pending');
+        $response->assertStatus(422)
+            ->assertJsonPath('message', 'Participante nao encontrado nesta despesa.');
 
-        $this->assertDatabaseHas('team_members', [
-            'team_id' => $expense->team_id,
-            'name' => 'Pedro Novo',
+        $this->assertDatabaseMissing('team_members', [
             'phone' => '11999888777',
-        ]);
-
-        $this->assertDatabaseHas('charges', [
-            'expense_id' => $expense->id,
-            'amount' => 50.00,
-            'status' => 'pending',
         ]);
     }
 
@@ -368,8 +356,8 @@ class PublicExpenseTest extends TestCase
 
         $file = UploadedFile::fake()->create('comp.jpg', 100, 'image/jpeg');
         $response = $this->post('/api/v1/public/expenses/test-hash-123/participate', [
-            'name' => 'Visitante Novo',
-            'phone' => '11988776600',
+            'name' => 'Maria Silva',
+            'phone' => '11000000002',
             'proof' => $file,
         ]);
 
@@ -377,12 +365,12 @@ class PublicExpenseTest extends TestCase
             ->assertJsonPath('status', 'proof_sent');
 
         $this->assertDatabaseHas('team_members', [
-            'name' => 'Visitante Novo',
-            'phone' => '11988776600',
+            'name' => 'Maria Silva',
+            'phone' => '11000000002',
         ]);
 
         $charge = Charge::query()->where('expense_id', Expense::where('public_hash', 'test-hash-123')->value('id'))
-            ->whereHas('teamMember', fn ($q) => $q->where('phone', '11988776600'))
+            ->whereHas('teamMember', fn ($q) => $q->where('phone', '11000000002'))
             ->first();
         $this->assertNotNull($charge);
         $this->assertSame('proof_sent', $charge->status);
@@ -397,8 +385,8 @@ class PublicExpenseTest extends TestCase
         $this->createExpenseWithCharges();
 
         $payload = [
-            'name' => 'Fulano',
-            'phone' => '11988776600',
+            'name' => 'Maria Silva',
+            'phone' => '11000000002',
             'proof' => UploadedFile::fake()->create('a.jpg', 100, 'image/jpeg'),
         ];
         $this->post('/api/v1/public/expenses/test-hash-123/participate', $payload)->assertStatus(201);

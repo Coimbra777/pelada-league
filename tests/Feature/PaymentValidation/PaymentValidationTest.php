@@ -137,7 +137,7 @@ class PaymentValidationTest extends TestCase
         ]);
     }
 
-    public function test_expense_reflects_partial_validation(): void
+    public function test_expense_stays_open_until_all_charges_validated(): void
     {
         [$admin, , $expense, $charge1] = $this->createExpenseSetup();
 
@@ -146,7 +146,7 @@ class PaymentValidationTest extends TestCase
 
         $this->assertDatabaseHas('expenses', [
             'id' => $expense->id,
-            'status' => 'partially_paid',
+            'status' => 'open',
         ]);
     }
 

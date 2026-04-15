@@ -11,6 +11,8 @@ use Illuminate\Support\Str;
 
 class PublicExpenseCreatorService
 {
+    public function __construct(private ExpenseService $expenseService) {}
+
     /**
      * @param  array{owner_name: string, owner_phone: string, description: string, amount: float|int|string, pix_key: string, pix_qr_code: ?string, due_date: string, participants: list<array{name: string, phone: string}>}  $data
      */
@@ -22,9 +24,7 @@ class PublicExpenseCreatorService
                 'owner_id' => null,
             ]);
 
-            $participantCount = count($data['participants']);
             $totalAmount = (float) $data['amount'];
-            $baseAmount = floor($totalAmount / $participantCount * 100) / 100;
 
             $expense = Expense::create([
                 'team_id' => $team->id,
@@ -33,7 +33,7 @@ class PublicExpenseCreatorService
                 'owner_phone' => $data['owner_phone'],
                 'description' => $data['description'],
                 'total_amount' => $totalAmount,
-                'amount_per_member' => $baseAmount,
+                'amount_per_member' => 0,
                 'due_date' => $data['due_date'],
                 'pix_key' => $data['pix_key'],
                 'pix_qr_code' => $data['pix_qr_code'] ?? null,
@@ -42,12 +42,7 @@ class PublicExpenseCreatorService
                 'manage_token' => (string) Str::uuid(),
             ]);
 
-            foreach ($data['participants'] as $index => $participant) {
-                $isLast = $index === $participantCount - 1;
-                $amount = $isLast
-                    ? round($totalAmount - ($baseAmount * ($participantCount - 1)), 2)
-                    : $baseAmount;
-
+            foreach ($data['participants'] as $participant) {
                 $member = TeamMember::create([
                     'team_id' => $team->id,
                     'user_id' => null,
@@ -60,11 +55,13 @@ class PublicExpenseCreatorService
                     'team_member_id' => $member->id,
                     'expense_id' => $expense->id,
                     'description' => $data['description'],
-                    'amount' => $amount,
+                    'amount' => 0.0,
                     'due_date' => $data['due_date'],
                     'status' => 'pending',
                 ]);
             }
+
+            $this->expenseService->redistributeChargeAmounts($expense);
 
             return $expense->load('charges.teamMember');
         });

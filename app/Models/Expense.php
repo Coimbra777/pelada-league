@@ -42,6 +42,12 @@ class Expense extends Model
                 $expense->manage_token = (string) Str::uuid();
             }
         });
+
+        static::saving(function (Expense $expense) {
+            if (! in_array($expense->status, ['open', 'closed'], true)) {
+                throw new \DomainException('Status de despesa invalido: apenas open ou closed.');
+            }
+        });
     }
 
     protected function casts(): array
@@ -86,45 +92,18 @@ class Expense extends Model
     }
 
     /**
-     * Atualiza status agregado da despesa com base nas cobranças (fluxo comprovante / validação).
-     * Não altera despesas já encerradas (closed).
+     * Se todas as cobranças estiverem validadas, marca a despesa como encerrada (MVP).
      */
-    public function recalculateStatus(): void
+    public function syncClosedStateFromCharges(): void
     {
-        if ($this->status === 'closed') {
+        if (! $this->charges()->exists()) {
             return;
         }
 
-        $charges = $this->charges()->get();
+        $allValidated = $this->charges()->where('status', '!=', 'validated')->doesntExist();
 
-        if ($charges->isEmpty()) {
-            return;
-        }
-
-        $allValidated = $charges->every(fn ($c) => $c->status === 'validated');
-        $someValidated = $charges->contains(fn ($c) => $c->status === 'validated');
-        $today = now()->startOfDay();
-
-        $anyOverdue = $charges->contains(function ($c) use ($today) {
-            if ($c->status === 'validated') {
-                return false;
-            }
-
-            return $c->due_date && $c->due_date->copy()->startOfDay()->lt($today);
-        });
-
-        if ($allValidated) {
-            $newStatus = 'paid';
-        } elseif ($someValidated) {
-            $newStatus = 'partially_paid';
-        } elseif ($anyOverdue) {
-            $newStatus = 'overdue';
-        } else {
-            $newStatus = 'open';
-        }
-
-        if ($this->status !== $newStatus) {
-            $this->update(['status' => $newStatus]);
+        if ($allValidated && $this->status !== 'closed') {
+            $this->update(['status' => 'closed']);
         }
     }
 }

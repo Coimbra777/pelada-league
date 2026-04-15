@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ChargeResource;
 use App\Models\Charge;
+use App\Support\ChargeStatusTransition;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -25,21 +26,15 @@ class ChargeValidationController extends Controller
             return response()->json(['message' => 'Charge must have proof_sent status.'], 422);
         }
 
+        ChargeStatusTransition::assertTransition($charge->status, 'validated');
+
         $charge->update([
             'status' => 'validated',
             'paid_at' => now(),
             'rejection_reason' => null,
         ]);
 
-        $expense = $charge->expense;
-        if ($expense) {
-            $allValidated = $expense->charges()->where('status', '!=', 'validated')->doesntExist();
-            if ($allValidated) {
-                $expense->update(['status' => 'closed']);
-            } else {
-                $expense->recalculateStatus();
-            }
-        }
+        $charge->expense?->syncClosedStateFromCharges();
 
         return response()->json([
             'charge' => new ChargeResource($charge->load('teamMember')),
@@ -57,6 +52,8 @@ class ChargeValidationController extends Controller
             return response()->json(['message' => 'Charge must have proof_sent status.'], 422);
         }
 
+        ChargeStatusTransition::assertTransition($charge->status, 'rejected');
+
         $reasonRaw = $request->input('reason');
         $reason = is_string($reasonRaw) && trim($reasonRaw) !== ''
             ? Str::limit(trim($reasonRaw), 2000)
@@ -71,8 +68,6 @@ class ChargeValidationController extends Controller
         if ($latestProof) {
             $latestProof->update(['status' => 'rejected']);
         }
-
-        $charge->expense?->recalculateStatus();
 
         return response()->json([
             'charge' => new ChargeResource($charge->load('teamMember')),

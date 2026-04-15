@@ -7,6 +7,7 @@ use App\Models\Expense;
 use App\Models\Team;
 use App\Models\TeamMember;
 use App\Models\User;
+use App\Support\ChargeStatusTransition;
 use App\Support\PhoneNormalizer;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -23,19 +24,12 @@ class ExpenseService
             throw new \DomainException('Team has no members.');
         }
 
-        $memberCount = $members->count();
-        $totalAmount = (float) $data['total_amount'];
-        $totalCents = (int) round($totalAmount * 100);
-        $baseCents = intdiv($totalCents, $memberCount);
-        $remainder = $totalCents % $memberCount;
-        $baseAmount = round($baseCents / 100, 2);
-
         $expense = Expense::create([
             'team_id' => $team->id,
             'created_by' => $creator->id,
             'description' => $data['description'],
             'total_amount' => $data['total_amount'],
-            'amount_per_member' => $baseAmount,
+            'amount_per_member' => 0,
             'due_date' => $data['due_date'],
             'pix_key' => $data['pix_key'],
             'pix_qr_code' => $data['pix_qr_code'] ?? null,
@@ -44,26 +38,44 @@ class ExpenseService
             'manage_token' => (string) Str::uuid(),
         ]);
 
-        foreach ($members as $index => $member) {
-            $cents = $baseCents + ($index < $remainder ? 1 : 0);
-            $amount = round($cents / 100, 2);
-
+        foreach ($members as $member) {
             try {
-                $charge = Charge::create([
+                Charge::create([
                     'team_member_id' => $member->id,
                     'user_id' => $member->user_id,
                     'expense_id' => $expense->id,
                     'description' => $data['description'],
-                    'amount' => $amount,
+                    'amount' => 0.0,
                     'due_date' => $data['due_date'],
                     'status' => 'pending',
                 ]);
-
-                $this->notificationService->sendChargeNotification($member, $charge, $expense);
             } catch (\Throwable $e) {
                 Log::error('Failed to create charge for team member', [
                     'team_member_id' => $member->id,
                     'expense_id' => $expense->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        $this->redistributeChargeAmounts($expense);
+
+        foreach ($members as $member) {
+            $charge = $expense->charges()->where('team_member_id', $member->id)->first();
+            if (! $charge || ! $charge->teamMember) {
+                continue;
+            }
+
+            try {
+                $this->notificationService->sendChargeNotification(
+                    $member,
+                    $charge->fresh(),
+                    $expense->fresh()
+                );
+            } catch (\Throwable $e) {
+                Log::warning('Failed to notify charge', [
+                    'team_member_id' => $member->id,
+                    'charge_id' => $charge->id,
                     'error' => $e->getMessage(),
                 ]);
             }
@@ -94,7 +106,7 @@ class ExpenseService
         if ($totalChanged) {
             if ($expense->charges()->where('status', '!=', 'pending')->exists()) {
                 throw new \DomainException(
-                    'Nao e possivel alterar o valor total enquanto houver cobranca enviada, paga ou validada.'
+                    'Nao e possivel alterar o valor total enquanto houver cobranca com status diferente de pendente.'
                 );
             }
             $this->redistributeChargeAmounts($expense->fresh());
@@ -205,6 +217,8 @@ class ExpenseService
         if ($count === 0) {
             return;
         }
+
+        ChargeStatusTransition::assertAllPendingForRedistribution($charges);
 
         $totalCents = (int) round((float) $expense->total_amount * 100);
         $baseCents = intdiv($totalCents, $count);

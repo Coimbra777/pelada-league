@@ -11,6 +11,8 @@ class Charge extends Model
 {
     use HasFactory;
 
+    public const STATUSES = ['pending', 'proof_sent', 'validated', 'rejected'];
+
     protected $fillable = [
         'user_id',
         'team_member_id',
@@ -22,6 +24,19 @@ class Charge extends Model
         'rejection_reason',
         'paid_at',
     ];
+
+    protected static function booted(): void
+    {
+        static::saving(function (Charge $charge) {
+            if (! in_array($charge->status, self::STATUSES, true)) {
+                throw new \DomainException('Status de cobranca invalido: '.$charge->status);
+            }
+
+            if ($charge->status !== 'rejected') {
+                $charge->rejection_reason = null;
+            }
+        });
+    }
 
     protected function casts(): array
     {
