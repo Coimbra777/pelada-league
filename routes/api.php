@@ -29,7 +29,8 @@ Route::prefix('v1')->group(function () {
         Route::post('/expenses/{hash}/participants', [PublicExpenseController::class, 'addParticipants']);
         Route::get('/expenses/{hash}/participants/{participantHash}', [PublicExpenseController::class, 'showParticipant']);
         Route::post('/expenses/{hash}/identify', [PublicExpenseController::class, 'identify']);
-        Route::post('/expenses/{hash}/participate', [PublicExpenseController::class, 'participate']);
+        Route::post('/expenses/{hash}/validate-participant', [PublicExpenseController::class, 'validateParticipantPublic']);
+        Route::post('/expenses/{hash}/submit-proof', [PublicExpenseController::class, 'submitProofPublic']);
         Route::post('/charges/{charge}/upload-proof', [PublicExpenseController::class, 'uploadProof']);
         Route::post('/charges/{charge}/mark-as-paid', [PublicExpenseController::class, 'markAsPaid']);
         Route::patch('/charges/{charge}/validate', [PublicExpenseController::class, 'validateCharge']);

@@ -69,20 +69,10 @@ class PublicExpenseResource extends JsonResource
             'participants' => $this->whenLoaded('charges', fn () => $this->charges->map(function ($charge) {
                 return [
                     'name' => $charge->teamMember?->name,
-                    'status' => $this->mapParticipantStatus($charge->status),
+                    'status' => $charge->status,
                 ];
             })),
         ];
-    }
-
-    private function mapParticipantStatus(string $status): string
-    {
-        return match ($status) {
-            'validated' => 'validated',
-            'proof_sent' => 'proof_sent',
-            'rejected' => 'pending',
-            default => 'pending',
-        };
     }
 
     private function participantUrl(string $participantHash): string

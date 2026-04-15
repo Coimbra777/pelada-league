@@ -5,7 +5,6 @@ export const usePublicExpenseStore = defineStore('publicExpense', {
     state: () => ({
         expense: null,
         participantBundle: null,
-        members: null,
         selectedMember: null,
         loading: false,
         error: null,
@@ -15,7 +14,6 @@ export const usePublicExpenseStore = defineStore('publicExpense', {
         reset() {
             this.expense = null;
             this.participantBundle = null;
-            this.members = null;
             this.selectedMember = null;
             this.error = null;
         },
@@ -44,21 +42,6 @@ export const usePublicExpenseStore = defineStore('publicExpense', {
                 this.expense = data.expense;
             } catch (err) {
                 this.error = err.data?.message || 'Erro ao carregar.';
-                throw err;
-            } finally {
-                this.loading = false;
-            }
-        },
-
-        async identifyMember(hash, { name, phone }) {
-            this.loading = true;
-            this.error = null;
-            try {
-                const data = await api.post(`/public/expenses/${hash}/identify`, { name, phone });
-                this.members = data.members;
-                return data.members;
-            } catch (err) {
-                this.error = err.data?.message || 'Nao foi possivel identificar.';
                 throw err;
             } finally {
                 this.loading = false;
@@ -135,14 +118,24 @@ export const usePublicExpenseStore = defineStore('publicExpense', {
             return data;
         },
 
-        async participate(hash, { name, phone, file }) {
+        async validateParticipant(hash, { name, phone }) {
+            this.error = null;
+            try {
+                return await api.post(`/public/expenses/${hash}/validate-participant`, { name, phone });
+            } catch (err) {
+                this.error = err.data?.message || 'Falha ao validar dados.';
+                throw err;
+            }
+        },
+
+        async submitProof(hash, { name, phone, file }) {
             this.error = null;
             const formData = new FormData();
             formData.append('name', name);
             formData.append('phone', phone);
             formData.append('proof', file);
             try {
-                return await api.postFormData(`/public/expenses/${hash}/participate`, formData);
+                return await api.postFormData(`/public/expenses/${hash}/submit-proof`, formData);
             } catch (err) {
                 this.error = err.data?.message || 'Falha ao enviar comprovante.';
                 throw err;

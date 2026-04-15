@@ -60,17 +60,14 @@ const rejected = computed(() => charge.value?.status === 'rejected');
 
 /* --- Modo grupo (/p/{hash}) --- */
 const showParticipateForm = ref(false);
-const participationDone = ref(false);
 const participantName = ref('');
 const participantPhone = ref('');
 const proofFile = ref(null);
 const proofFileInput = ref(null);
 const participateErrors = ref({});
-const participateSubmitting = ref(false);
-
-function groupStorageKey() {
-    return `public_participation_done_${props.hash}`;
-}
+const participateValidating = ref(false);
+const participateProofSubmitting = ref(false);
+const participateValidated = ref(null);
 
 const headerExpense = computed(() => {
     const e = store.expense;
@@ -97,11 +94,22 @@ function onProofFileChange(ev) {
     participateErrors.value = { ...participateErrors.value, proof: null };
 }
 
-function onGroupPhoneInput(ev) {
-    participantPhone.value = formatPhoneBr(ev.target.value);
+function clearGroupParticipateValidation() {
+    participateValidated.value = null;
+    proofFile.value = null;
+    if (proofFileInput.value) proofFileInput.value.value = '';
 }
 
-async function submitGroupParticipation() {
+function onGroupNameInput() {
+    clearGroupParticipateValidation();
+}
+
+function onGroupPhoneInput(ev) {
+    participantPhone.value = formatPhoneBr(ev.target.value);
+    clearGroupParticipateValidation();
+}
+
+async function validateGroupParticipant() {
     participateErrors.value = {};
     const name = participantName.value.trim();
     const phoneDigits = participantPhone.value.replace(/\D/g, '');
@@ -113,35 +121,63 @@ async function submitGroupParticipation() {
         participateErrors.value.phone = 'Informe um telefone valido (min. 10 digitos).';
         return;
     }
+
+    participateValidating.value = true;
+    try {
+        const data = await store.validateParticipant(props.hash, { name, phone: phoneDigits });
+        participateValidated.value = {
+            status: data.status,
+            message: data.message,
+            rejection_reason: data.rejection_reason ?? null,
+            can_submit_proof: !!data.can_submit_proof,
+        };
+        toast.success('Dados confirmados.');
+    } catch (err) {
+        participateValidated.value = null;
+        toast.error(err.data?.message || store.error || 'Nao foi possivel validar.');
+    } finally {
+        participateValidating.value = false;
+    }
+}
+
+async function submitGroupProof() {
+    if (!participateValidated.value?.can_submit_proof) return;
+    participateErrors.value = {};
+    const name = participantName.value.trim();
+    const phoneDigits = participantPhone.value.replace(/\D/g, '');
     if (!proofFile.value) {
         participateErrors.value.proof = 'Selecione o comprovante.';
         return;
     }
 
-    participateSubmitting.value = true;
+    participateProofSubmitting.value = true;
     try {
-        await store.participate(props.hash, {
+        const data = await store.submitProof(props.hash, {
             name,
             phone: phoneDigits,
             file: proofFile.value,
         });
-        participationDone.value = true;
+        toast.success(data.message || 'Comprovante enviado.');
         showParticipateForm.value = false;
-        if (typeof sessionStorage !== 'undefined') {
-            sessionStorage.setItem(groupStorageKey(), '1');
-        }
-        toast.success('Comprovante enviado! Aguardando aprovacao do responsavel.');
         participantName.value = '';
         participantPhone.value = '';
         proofFile.value = null;
+        participateValidated.value = null;
         if (proofFileInput.value) proofFileInput.value.value = '';
         await store.fetchExpense(props.hash, null);
-        console.log('Participate OK, expense atualizado', store.expense);
     } catch (err) {
-        console.error('Participate erro', err);
-        toast.error(err.data?.message || store.error || 'Nao foi possivel enviar.');
+        const d = err.data || {};
+        if (d.status) {
+            participateValidated.value = {
+                status: d.status,
+                message: d.message,
+                rejection_reason: d.rejection_reason ?? null,
+                can_submit_proof: ['pending', 'rejected'].includes(d.status),
+            };
+        }
+        toast.error(d.message || store.error || 'Nao foi possivel enviar.');
     } finally {
-        participateSubmitting.value = false;
+        participateProofSubmitting.value = false;
     }
 }
 
@@ -156,9 +192,6 @@ onMounted(async () => {
     });
 
     if (isGroupMode.value) {
-        if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem(groupStorageKey()) === '1') {
-            participationDone.value = true;
-        }
         try {
             await store.fetchExpense(props.hash, null);
             console.log('GET public expense (grupo)', store.expense);
@@ -259,18 +292,6 @@ async function copyPublicLinkGroup() {
                         </p>
                     </div>
 
-                    <div
-                        v-else-if="participationDone"
-                        class="rounded-xl border border-green-200 bg-green-50 px-4 py-4 text-center"
-                    >
-                        <p class="text-sm font-medium text-green-900">
-                            Aguardando aprovacao do responsavel
-                        </p>
-                        <p class="text-xs text-green-800/90 mt-2">
-                            Seu comprovante foi enviado. Nao e possivel enviar outro por aqui.
-                        </p>
-                    </div>
-
                     <template v-else-if="!isGroupExpenseClosed">
                         <button
                             v-if="!showParticipateForm"
@@ -281,12 +302,13 @@ async function copyPublicLinkGroup() {
                             Participar
                         </button>
 
-                        <form
+                        <div
                             v-else
                             class="rounded-xl border border-gray-200 bg-white p-4 space-y-3 shadow-sm"
-                            @submit.prevent="submitGroupParticipation"
                         >
-                            <p class="text-sm font-medium text-gray-900">Enviar comprovante</p>
+                            <p class="text-xs text-gray-600">
+                                Nome e telefone devem ser <strong>identicos</strong> ao cadastro.
+                            </p>
                             <div>
                                 <label class="block text-xs font-medium text-gray-600 mb-1">Nome (obrigatorio)</label>
                                 <input
@@ -295,6 +317,7 @@ async function copyPublicLinkGroup() {
                                     autocomplete="name"
                                     class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                                     :class="participateErrors.name ? 'border-red-400' : ''"
+                                    @input="onGroupNameInput"
                                 />
                                 <p v-if="participateErrors.name" class="text-xs text-red-600 mt-1">{{ participateErrors.name }}</p>
                             </div>
@@ -312,27 +335,54 @@ async function copyPublicLinkGroup() {
                                 />
                                 <p v-if="participateErrors.phone" class="text-xs text-red-600 mt-1">{{ participateErrors.phone }}</p>
                             </div>
-                            <div>
-                                <label class="block text-xs font-medium text-gray-600 mb-1">Comprovante (obrigatorio)</label>
-                                <input
-                                    ref="proofFileInput"
-                                    type="file"
-                                    accept="image/jpeg,image/png,image/jpg,application/pdf"
-                                    class="block w-full text-sm text-gray-600"
-                                    :class="participateErrors.proof ? 'text-red-600' : ''"
-                                    @change="onProofFileChange"
-                                />
-                                <p class="text-xs text-gray-500 mt-1">JPG, PNG ou PDF, ate 5 MB</p>
-                                <p v-if="participateErrors.proof" class="text-xs text-red-600 mt-1">{{ participateErrors.proof }}</p>
-                            </div>
                             <button
-                                type="submit"
-                                class="w-full min-h-[48px] rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-60"
-                                :disabled="participateSubmitting"
+                                type="button"
+                                class="w-full min-h-[48px] rounded-xl border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 disabled:opacity-60"
+                                :disabled="participateValidating"
+                                @click="validateGroupParticipant"
                             >
-                                {{ participateSubmitting ? 'Enviando...' : 'Enviar comprovante' }}
+                                {{ participateValidating ? 'Validando...' : 'Validar meus dados' }}
                             </button>
-                        </form>
+                            <div
+                                v-if="participateValidated"
+                                class="rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm space-y-2"
+                            >
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <span class="text-xs text-gray-600">Status:</span>
+                                    <StatusBadge :status="participateValidated.status" />
+                                </div>
+                                <p class="font-medium text-gray-900">{{ participateValidated.message }}</p>
+                                <p
+                                    v-if="participateValidated.rejection_reason"
+                                    class="text-xs text-orange-900 bg-orange-50 rounded px-2 py-1"
+                                >
+                                    {{ participateValidated.rejection_reason }}
+                                </p>
+                            </div>
+                            <template v-if="participateValidated?.can_submit_proof">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">Comprovante</label>
+                                    <input
+                                        ref="proofFileInput"
+                                        type="file"
+                                        accept="image/jpeg,image/png,image/jpg,application/pdf"
+                                        class="block w-full text-sm text-gray-600"
+                                        :class="participateErrors.proof ? 'text-red-600' : ''"
+                                        @change="onProofFileChange"
+                                    />
+                                    <p class="text-xs text-gray-500 mt-1">JPG, PNG ou PDF, ate 5 MB</p>
+                                    <p v-if="participateErrors.proof" class="text-xs text-red-600 mt-1">{{ participateErrors.proof }}</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    class="w-full min-h-[48px] rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                                    :disabled="participateProofSubmitting || !proofFile"
+                                    @click="submitGroupProof"
+                                >
+                                    {{ participateProofSubmitting ? 'Enviando...' : 'Enviar comprovante' }}
+                                </button>
+                            </template>
+                        </div>
                     </template>
 
                     <button
@@ -424,7 +474,9 @@ async function copyPublicLinkGroup() {
                     <div class="text-center py-4 space-y-2">
                         <StatusBadge status="proof_sent" />
                         <p class="text-sm text-gray-700 font-medium">Aguardando aprovacao do responsavel.</p>
-                        <p class="text-xs text-gray-500">Voce nao precisa enviar outro comprovante.</p>
+                        <p class="text-xs text-gray-500">
+                            Voce pode voltar a este link a qualquer momento; o status e atualizado automaticamente.
+                        </p>
                     </div>
                 </Card>
 
@@ -439,7 +491,16 @@ async function copyPublicLinkGroup() {
                     </div>
                 </Card>
 
-                <template v-else-if="canUpload && charge">
+                <Card v-if="rejected && canUpload" class="mb-4 border-orange-200 bg-orange-50">
+                    <p class="text-sm text-orange-900 text-center py-2 font-medium">
+                        Comprovante rejeitado. Envie um novo arquivo abaixo.
+                    </p>
+                    <p v-if="charge?.rejection_reason" class="text-xs text-orange-900/90 text-center px-2 pb-2">
+                        {{ charge.rejection_reason }}
+                    </p>
+                </Card>
+
+                <template v-if="canUpload && charge">
                     <Card title="Enviar comprovante" class="mb-4">
                         <UploadProof :charge-id="charge.id" @uploaded="afterProofUploaded">
                             <template #after-upload>
@@ -459,12 +520,6 @@ async function copyPublicLinkGroup() {
                         </UploadProof>
                     </Card>
                 </template>
-
-                <Card v-if="rejected" class="mb-4 border-orange-200 bg-orange-50">
-                    <p class="text-sm text-orange-900 text-center py-2">
-                        Comprovante rejeitado. Envie um novo arquivo abaixo.
-                    </p>
-                </Card>
 
                 <Card v-if="members.length" title="Todos os participantes">
                     <MemberList :members="members" :is-admin="false" />

@@ -36,17 +36,14 @@ const proofModalOpen = ref(false);
 const proofChargeId = ref(null);
 
 const showParticipateForm = ref(false);
-const participationDone = ref(false);
 const participantName = ref('');
 const participantPhone = ref('');
 const proofFile = ref(null);
 const proofFileInput = ref(null);
 const participateErrors = ref({});
-const participateSubmitting = ref(false);
-
-function participationStorageKey() {
-    return `public_participation_done_${props.hash}`;
-}
+const participateValidating = ref(false);
+const participateProofSubmitting = ref(false);
+const participateValidated = ref(null);
 
 const headerExpense = computed(() => {
     const e = store.expense;
@@ -234,15 +231,22 @@ function onProofFileChange(ev) {
     participateErrors.value = { ...participateErrors.value, proof: null };
 }
 
+function clearParticipateValidation() {
+    participateValidated.value = null;
+    proofFile.value = null;
+    if (proofFileInput.value) proofFileInput.value.value = '';
+}
+
+function onParticipantNameInput() {
+    clearParticipateValidation();
+}
+
 function onPhoneInput(ev) {
     participantPhone.value = formatPhoneBr(ev.target.value);
+    clearParticipateValidation();
 }
 
 onMounted(async () => {
-    if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem(participationStorageKey()) === '1') {
-        participationDone.value = true;
-    }
-
     if (!props.manage) {
         const stored = getByHash(props.hash);
         if (stored?.manage_token) {
@@ -276,7 +280,7 @@ async function copyPublicLink() {
     await copy(publicLink.value);
 }
 
-async function submitParticipation() {
+async function validatePublicParticipant() {
     participateErrors.value = {};
     const name = participantName.value.trim();
     const phoneDigits = participantPhone.value.replace(/\D/g, '');
@@ -288,33 +292,69 @@ async function submitParticipation() {
         participateErrors.value.phone = 'Informe um telefone valido (min. 10 digitos).';
         return;
     }
+
+    participateValidating.value = true;
+    try {
+        const data = await store.validateParticipant(props.hash, { name, phone: phoneDigits });
+        participateValidated.value = {
+            status: data.status,
+            message: data.message,
+            rejection_reason: data.rejection_reason ?? null,
+            can_submit_proof: !!data.can_submit_proof,
+        };
+        toast.success('Dados confirmados.');
+    } catch (err) {
+        participateValidated.value = null;
+        toast.error(err.data?.message || store.error || 'Nao foi possivel validar.');
+    } finally {
+        participateValidating.value = false;
+    }
+}
+
+async function submitPublicProof() {
+    if (!participateValidated.value?.can_submit_proof) return;
+    participateErrors.value = {};
+    const name = participantName.value.trim();
+    const phoneDigits = participantPhone.value.replace(/\D/g, '');
     if (!proofFile.value) {
         participateErrors.value.proof = 'Selecione o comprovante.';
         return;
     }
 
-    participateSubmitting.value = true;
+    participateProofSubmitting.value = true;
     try {
-        await store.participate(props.hash, {
+        const data = await store.submitProof(props.hash, {
             name,
             phone: phoneDigits,
             file: proofFile.value,
         });
-        participationDone.value = true;
-        showParticipateForm.value = false;
-        if (typeof sessionStorage !== 'undefined') {
-            sessionStorage.setItem(participationStorageKey(), '1');
-        }
-        toast.success('Comprovante enviado! Aguardando aprovacao do responsavel.');
-        participantName.value = '';
-        participantPhone.value = '';
+        participateValidated.value = {
+            status: data.status,
+            message: data.message,
+            rejection_reason: data.rejection_reason ?? null,
+            can_submit_proof: false,
+        };
+        toast.success(data.message || 'Comprovante enviado.');
         proofFile.value = null;
         if (proofFileInput.value) proofFileInput.value.value = '';
+        showParticipateForm.value = false;
+        participantName.value = '';
+        participantPhone.value = '';
+        participateValidated.value = null;
         await store.fetchExpense(props.hash, null);
     } catch (err) {
-        toast.error(err.data?.message || store.error || 'Nao foi possivel enviar.');
+        const d = err.data || {};
+        if (d.status) {
+            participateValidated.value = {
+                status: d.status,
+                message: d.message,
+                rejection_reason: d.rejection_reason ?? null,
+                can_submit_proof: ['pending', 'rejected'].includes(d.status),
+            };
+        }
+        toast.error(d.message || store.error || 'Nao foi possivel enviar.');
     } finally {
-        participateSubmitting.value = false;
+        participateProofSubmitting.value = false;
     }
 }
 
@@ -423,18 +463,6 @@ async function confirmCloseExpense() {
                         </p>
                     </div>
 
-                    <div
-                        v-else-if="participationDone"
-                        class="rounded-xl border border-green-200 bg-green-50 px-4 py-4 text-center"
-                    >
-                        <p class="text-sm font-medium text-green-900">
-                            Aguardando aprovacao do responsavel
-                        </p>
-                        <p class="text-xs text-green-800/90 mt-2">
-                            Seu comprovante foi enviado. Nao e possivel enviar outro por aqui.
-                        </p>
-                    </div>
-
                     <template v-else-if="!isClosed">
                         <button
                             v-if="!showParticipateForm"
@@ -445,12 +473,13 @@ async function confirmCloseExpense() {
                             Participar
                         </button>
 
-                        <form
+                        <div
                             v-else
                             class="rounded-xl border border-gray-200 bg-white p-4 space-y-3 shadow-sm"
-                            @submit.prevent="submitParticipation"
                         >
-                            <p class="text-sm font-medium text-gray-900">Enviar comprovante</p>
+                            <p class="text-xs text-gray-600">
+                                Nome e telefone devem ser <strong>identicos</strong> ao cadastro.
+                            </p>
                             <div>
                                 <label class="block text-xs font-medium text-gray-600 mb-1">Nome (obrigatorio)</label>
                                 <input
@@ -459,6 +488,7 @@ async function confirmCloseExpense() {
                                     autocomplete="name"
                                     class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                                     :class="participateErrors.name ? 'border-red-400' : ''"
+                                    @input="onParticipantNameInput"
                                 />
                                 <p v-if="participateErrors.name" class="text-xs text-red-600 mt-1">{{ participateErrors.name }}</p>
                             </div>
@@ -476,27 +506,54 @@ async function confirmCloseExpense() {
                                 />
                                 <p v-if="participateErrors.phone" class="text-xs text-red-600 mt-1">{{ participateErrors.phone }}</p>
                             </div>
-                            <div>
-                                <label class="block text-xs font-medium text-gray-600 mb-1">Comprovante (obrigatorio)</label>
-                                <input
-                                    ref="proofFileInput"
-                                    type="file"
-                                    accept="image/jpeg,image/png,image/jpg,application/pdf"
-                                    class="block w-full text-sm text-gray-600"
-                                    :class="participateErrors.proof ? 'text-red-600' : ''"
-                                    @change="onProofFileChange"
-                                />
-                                <p class="text-xs text-gray-500 mt-1">JPG, PNG ou PDF, ate 5 MB</p>
-                                <p v-if="participateErrors.proof" class="text-xs text-red-600 mt-1">{{ participateErrors.proof }}</p>
-                            </div>
                             <button
-                                type="submit"
-                                class="w-full min-h-[48px] rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-60"
-                                :disabled="participateSubmitting"
+                                type="button"
+                                class="w-full min-h-[48px] rounded-xl border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 disabled:opacity-60"
+                                :disabled="participateValidating"
+                                @click="validatePublicParticipant"
                             >
-                                {{ participateSubmitting ? 'Enviando...' : 'Enviar comprovante' }}
+                                {{ participateValidating ? 'Validando...' : 'Validar meus dados' }}
                             </button>
-                        </form>
+                            <div
+                                v-if="participateValidated"
+                                class="rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm space-y-2"
+                            >
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <span class="text-xs text-gray-600">Status:</span>
+                                    <StatusBadge :status="participateValidated.status" />
+                                </div>
+                                <p class="font-medium text-gray-900">{{ participateValidated.message }}</p>
+                                <p
+                                    v-if="participateValidated.rejection_reason"
+                                    class="text-xs text-orange-900 bg-orange-50 rounded px-2 py-1"
+                                >
+                                    {{ participateValidated.rejection_reason }}
+                                </p>
+                            </div>
+                            <template v-if="participateValidated?.can_submit_proof">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">Comprovante</label>
+                                    <input
+                                        ref="proofFileInput"
+                                        type="file"
+                                        accept="image/jpeg,image/png,image/jpg,application/pdf"
+                                        class="block w-full text-sm text-gray-600"
+                                        :class="participateErrors.proof ? 'text-red-600' : ''"
+                                        @change="onProofFileChange"
+                                    />
+                                    <p class="text-xs text-gray-500 mt-1">JPG, PNG ou PDF, ate 5 MB</p>
+                                    <p v-if="participateErrors.proof" class="text-xs text-red-600 mt-1">{{ participateErrors.proof }}</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    class="w-full min-h-[48px] rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                                    :disabled="participateProofSubmitting || !proofFile"
+                                    @click="submitPublicProof"
+                                >
+                                    {{ participateProofSubmitting ? 'Enviando...' : 'Enviar comprovante' }}
+                                </button>
+                            </template>
+                        </div>
                     </template>
 
                     <button

@@ -6,10 +6,11 @@ use App\Http\Controllers\Concerns\AuthorizesPublicExpense;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\AddPublicExpenseParticipantsRequest;
 use App\Http\Requests\Api\V1\IdentifyMemberRequest;
-use App\Http\Requests\Api\V1\ParticipatePublicExpenseRequest;
 use App\Http\Requests\Api\V1\StorePublicExpenseRequest;
+use App\Http\Requests\Api\V1\SubmitPublicProofRequest;
 use App\Http\Requests\Api\V1\UpdatePublicExpenseRequest;
 use App\Http\Requests\Api\V1\UploadProofRequest;
+use App\Http\Requests\Api\V1\ValidateParticipantPublicRequest;
 use App\Http\Resources\CreatedPublicExpenseResource;
 use App\Http\Resources\PaymentProofResource;
 use App\Http\Resources\PublicExpenseResource;
@@ -222,7 +223,40 @@ class PublicExpenseController extends Controller
         ], 201);
     }
 
-    public function participate(ParticipatePublicExpenseRequest $request, string $hash, PaymentProofService $service): JsonResponse
+    public function validateParticipantPublic(ValidateParticipantPublicRequest $request, string $hash): JsonResponse
+    {
+        $expense = Expense::byHash($hash)->first();
+
+        if (! $expense) {
+            return response()->json(['message' => 'Not found.'], 404);
+        }
+
+        if ($blocked = $this->rejectIfClosed($expense)) {
+            return $blocked;
+        }
+
+        $validated = $request->validated();
+        $charge = $this->findChargeForExactPublicParticipant($expense, $validated['name'], $validated['phone']);
+
+        if ($charge === null) {
+            return response()->json([
+                'message' => 'Participante não encontrado nesta despesa.',
+            ], 422);
+        }
+
+        $charge->refresh();
+
+        $status = $charge->status;
+
+        return response()->json([
+            'status' => $status,
+            'rejection_reason' => $charge->rejection_reason,
+            'message' => $this->messageForValidateParticipantStatus($status),
+            'can_submit_proof' => in_array($status, ['pending', 'rejected'], true),
+        ]);
+    }
+
+    public function submitProofPublic(SubmitPublicProofRequest $request, string $hash, PaymentProofService $service): JsonResponse
     {
         $expense = Expense::where('public_hash', $hash)->firstOrFail();
 
@@ -231,25 +265,50 @@ class PublicExpenseController extends Controller
         }
 
         $validated = $request->validated();
+        $charge = $this->findChargeForExactPublicParticipant($expense, $validated['name'], $validated['phone']);
 
-        try {
-            $charge = $this->findParticipantChargeForParticipation($expense, $validated['name'], $validated['phone']);
-        } catch (\DomainException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
+        if ($charge === null) {
+            return response()->json([
+                'message' => 'Participante não encontrado nesta despesa.',
+            ], 422);
         }
 
+        $charge->refresh();
+
         if ($charge->status === 'validated') {
-            return response()->json(['message' => 'Pagamento ja validado.'], 422);
+            return response()->json([
+                'message' => 'Pagamento já confirmado.',
+                'status' => 'validated',
+                'rejection_reason' => null,
+            ], 422);
         }
 
         if ($charge->status === 'proof_sent') {
-            return response()->json(['message' => 'Aguardando aprovacao do responsavel.'], 422);
+            return response()->json([
+                'message' => 'Comprovante já enviado.',
+                'status' => 'proof_sent',
+                'rejection_reason' => null,
+            ], 422);
+        }
+
+        if (! in_array($charge->status, ['pending', 'rejected'], true)) {
+            return response()->json([
+                'message' => 'Não é possível enviar comprovante neste estado.',
+                'status' => $charge->status,
+                'rejection_reason' => $charge->rejection_reason,
+            ], 422);
         }
 
         try {
             $service->uploadProof($charge, $request->file('proof'));
         } catch (\DomainException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
+            $fresh = $charge->fresh();
+
+            return response()->json([
+                'message' => $e->getMessage(),
+                'status' => $fresh?->status ?? $charge->status,
+                'rejection_reason' => $fresh?->rejection_reason,
+            ], 422);
         }
 
         $charge->refresh();
@@ -258,9 +317,12 @@ class PublicExpenseController extends Controller
 
         $charge->update(['status' => 'proof_sent']);
 
+        $charge->refresh();
+
         return response()->json([
-            'message' => 'Aguardando aprovacao do responsavel.',
-            'status' => 'proof_sent',
+            'message' => 'Comprovante enviado. Aguardando aprovação do responsável.',
+            'status' => $charge->status,
+            'rejection_reason' => $charge->rejection_reason,
         ], 201);
     }
 
@@ -310,6 +372,7 @@ class PublicExpenseController extends Controller
                 'id' => $charge->id,
                 'amount' => $charge->amount,
                 'status' => $charge->status,
+                'rejection_reason' => $charge->rejection_reason,
             ],
             'members' => $expense->charges->map(fn ($c) => [
                 'id' => $c->teamMember?->id,
@@ -337,54 +400,15 @@ class PublicExpenseController extends Controller
         $validated = $request->validated();
         $name = $validated['name'];
         $phoneRaw = $validated['phone'];
-        $phoneDigits = preg_replace('/\D+/', '', $phoneRaw) ?? '';
 
-        $charges = $expense->charges()
-            ->with('teamMember')
-            ->get()
-            ->filter(function (Charge $charge) use ($phoneDigits) {
-                if ($phoneDigits === '') {
-                    return false;
-                }
-                $m = $charge->teamMember;
-
-                return $m && preg_replace('/\D+/', '', (string) $m->phone) === $phoneDigits;
-            })
-            ->values();
-
-        if ($charges->isEmpty()) {
-            $charges = $expense->charges()
-                ->whereHas('teamMember', function ($q) use ($name) {
-                    $q->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($name).'%']);
-                })
-                ->with('teamMember')
-                ->get();
-
-            if ($charges->count() > 1 && $phoneDigits !== '') {
-                $narrowed = $charges->filter(function (Charge $charge) use ($phoneDigits) {
-                    $m = $charge->teamMember;
-
-                    return $m && preg_replace('/\D+/', '', (string) $m->phone) === $phoneDigits;
-                });
-                if ($narrowed->isNotEmpty()) {
-                    $charges = $narrowed->values();
-                }
-            }
-        }
-
-        if ($charges->isEmpty()) {
-            return response()->json([
-                'message' => 'Participante nao encontrado nesta despesa.',
-            ], 422);
-        }
-
-        $first = $charges->first();
-        if ($charges->count() > 1 && $first) {
-            $charges = collect([$first]);
+        try {
+            $charge = $this->locateParticipantChargeForPublicExpense($expense, $name, $phoneRaw);
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         }
 
         return response()->json([
-            'members' => $charges->map(fn (Charge $charge) => [
+            'members' => [[
                 'member_id' => $charge->teamMember?->id,
                 'unique_hash' => $charge->teamMember?->unique_hash,
                 'name' => $charge->teamMember?->name,
@@ -392,7 +416,8 @@ class PublicExpenseController extends Controller
                 'charge_id' => $charge->id,
                 'amount' => $charge->amount,
                 'status' => $charge->status,
-            ]),
+                'rejection_reason' => $charge->rejection_reason,
+            ]],
         ]);
     }
 
@@ -608,31 +633,93 @@ class PublicExpenseController extends Controller
         ]);
     }
 
-    private function findParticipantChargeForParticipation(Expense $expense, string $name, string $phone): Charge
+    /**
+     * Nome (trim) e telefone (só dígitos) devem coincidir exatamente com o cadastro. Não altera dados.
+     */
+    private function findChargeForExactPublicParticipant(Expense $expense, string $nameInput, string $phoneRaw): ?Charge
     {
-        $normalized = preg_replace('/\D+/', '', $phone) ?? '';
+        $nameTrim = trim($nameInput);
+        $phoneDigits = preg_replace('/\D+/', '', $phoneRaw) ?? '';
 
-        if (strlen($normalized) < 10) {
+        if ($nameTrim === '' || $phoneDigits === '' || strlen($phoneDigits) < 10) {
+            return null;
+        }
+
+        foreach ($expense->charges()->with('teamMember')->get() as $charge) {
+            $member = $charge->teamMember;
+            if ($member === null) {
+                continue;
+            }
+
+            $storedDigits = preg_replace('/\D+/', '', (string) $member->phone) ?? '';
+            $storedName = trim((string) $member->name);
+
+            if ($storedDigits === $phoneDigits && $storedName === $nameTrim) {
+                return $charge;
+            }
+        }
+
+        return null;
+    }
+
+    private function messageForValidateParticipantStatus(string $status): string
+    {
+        return match ($status) {
+            'pending' => 'Você ainda não enviou comprovante.',
+            'proof_sent' => 'Comprovante já enviado. Aguarde aprovação.',
+            'rejected' => 'Comprovante rejeitado. Envie novamente.',
+            'validated' => 'Pagamento já confirmado.',
+            default => 'Status desconhecido.',
+        };
+    }
+
+    /**
+     * Localiza cobrança por nome + telefone (mesma regra do identify), sem criar participante.
+     *
+     * @throws \DomainException
+     */
+    private function locateParticipantChargeForPublicExpense(Expense $expense, string $name, string $phoneRaw): Charge
+    {
+        $phoneDigits = preg_replace('/\D+/', '', $phoneRaw) ?? '';
+
+        if ($phoneDigits === '' || strlen($phoneDigits) < 10) {
             throw new \DomainException('Informe um telefone valido (min. 10 digitos).');
         }
 
-        $member = TeamMember::query()
-            ->where('team_id', $expense->team_id)
+        $charges = $expense->charges()
+            ->with('teamMember')
             ->get()
-            ->first(fn (TeamMember $m) => preg_replace('/\D+/', '', (string) $m->phone) === $normalized);
+            ->filter(function (Charge $charge) use ($phoneDigits) {
+                $m = $charge->teamMember;
 
-        if (! $member) {
-            throw new \DomainException('Participante nao encontrado nesta despesa.');
+                return $m && preg_replace('/\D+/', '', (string) $m->phone) === $phoneDigits;
+            })
+            ->values();
+
+        if ($charges->isEmpty()) {
+            $charges = $expense->charges()
+                ->whereHas('teamMember', function ($q) use ($name) {
+                    $q->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($name).'%']);
+                })
+                ->with('teamMember')
+                ->get();
+
+            if ($charges->count() > 1 && $phoneDigits !== '') {
+                $narrowed = $charges->filter(function (Charge $charge) use ($phoneDigits) {
+                    $m = $charge->teamMember;
+
+                    return $m && preg_replace('/\D+/', '', (string) $m->phone) === $phoneDigits;
+                });
+                if ($narrowed->isNotEmpty()) {
+                    $charges = $narrowed->values();
+                }
+            }
         }
 
-        $member->update(['name' => $name]);
-
-        $charge = $expense->charges()->where('team_member_id', $member->id)->first();
-
-        if (! $charge) {
-            throw new \DomainException('Participante nao encontrado nesta despesa.');
+        if ($charges->isEmpty()) {
+            throw new \DomainException('Participante não encontrado.');
         }
 
-        return $charge;
+        return $charges->first();
     }
 }

@@ -7,6 +7,7 @@ import { useClipboard } from '../../Composables/useClipboard.js';
 import { formatPhoneBr } from '../../Composables/useInputMasks.js';
 import ParticipantLayout from '../../Layouts/ParticipantLayout.vue';
 import Button from '../../Components/Button.vue';
+import StatusBadge from '../../Components/StatusBadge.vue';
 
 defineOptions({ layout: ParticipantLayout });
 
@@ -21,17 +22,19 @@ const loading = ref(true);
 const loadError = ref(false);
 const expense = ref(null);
 
-const isExpenseClosed = computed(() => expense.value?.status === 'closed');
-
 const name = ref('');
 const phone = ref('');
 const file = ref(null);
 const fileInput = ref(null);
 const fieldErrors = ref({});
-const submitting = ref(false);
-const success = ref(false);
 
-const LS_KEY = computed(() => `pure_participant_${props.hash}`);
+const validating = ref(false);
+const submittingProof = ref(false);
+
+/** Resposta 200 de validate-participant */
+const validated = ref(null);
+
+const isExpenseClosed = computed(() => expense.value?.status === 'closed');
 
 function formatBrl(value) {
     return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -45,44 +48,30 @@ const qrSrc = computed(() => {
     return `data:image/png;base64,${s}`;
 });
 
-const canSubmit = computed(() => {
-    const digits = phone.value.replace(/\D/g, '');
+const phoneDigits = computed(() => phone.value.replace(/\D/g, ''));
+
+const canValidate = computed(() => {
     return (
         name.value.trim().length > 0
-        && digits.length >= 10
-        && !!file.value
-        && !submitting.value && !success.value
+        && phoneDigits.value.length >= 10
+        && !validating.value
+        && !isExpenseClosed.value
     );
 });
 
-function onPhoneInput(ev) {
-    phone.value = formatPhoneBr(ev.target.value);
-}
-
-function onFileChange(ev) {
-    file.value = ev.target.files?.[0] ?? null;
-    fieldErrors.value = {};
-}
+const canSubmitProof = computed(() => {
+    return (
+        !!validated.value?.can_submit_proof
+        && !!file.value
+        && !submittingProof.value
+        && !isExpenseClosed.value
+    );
+});
 
 async function copyPixKey() {
     if (!expense.value?.pix_key) return;
     await copy(expense.value.pix_key);
     toast.success('Chave PIX copiada.');
-}
-
-async function restoreFromStorage() {
-    const stored = localStorage.getItem(LS_KEY.value);
-    if (!stored) return;
-
-    try {
-        const bundle = await api.get(`/public/expenses/${props.hash}/participants/${stored}`);
-        const st = bundle.charge?.status;
-        if (st === 'proof_sent' || st === 'validated') {
-            success.value = true;
-        }
-    } catch {
-        localStorage.removeItem(LS_KEY.value);
-    }
 }
 
 onMounted(async () => {
@@ -91,7 +80,6 @@ onMounted(async () => {
     try {
         const data = await api.get(`/public/expenses/${props.hash}`);
         expense.value = data.expense;
-        await restoreFromStorage();
     } catch {
         loadError.value = true;
     } finally {
@@ -99,22 +87,70 @@ onMounted(async () => {
     }
 });
 
-async function submit() {
-    if (isExpenseClosed.value) {
-        return;
-    }
+function clearValidation() {
+    validated.value = null;
+    file.value = null;
+    if (fileInput.value) fileInput.value.value = '';
+}
+
+function onNameInput() {
+    clearValidation();
+}
+
+function onPhoneInput(ev) {
+    phone.value = formatPhoneBr(ev.target.value);
+    clearValidation();
+}
+
+function onFileChange(ev) {
+    file.value = ev.target.files?.[0] ?? null;
+    fieldErrors.value = {};
+}
+
+async function validateParticipant() {
+    if (isExpenseClosed.value) return;
     fieldErrors.value = {};
     const trimmedName = name.value.trim();
-    const phoneDigits = phone.value.replace(/\D/g, '');
+    const digits = phoneDigits.value;
 
     if (!trimmedName) {
         fieldErrors.value.name = 'Informe seu nome.';
         return;
     }
-    if (phoneDigits.length < 10) {
+    if (digits.length < 10) {
         fieldErrors.value.phone = 'Telefone invalido.';
         return;
     }
+
+    validating.value = true;
+    try {
+        const data = await api.post(`/public/expenses/${props.hash}/validate-participant`, {
+            name: trimmedName,
+            phone: digits,
+        });
+        validated.value = {
+            status: data.status,
+            message: data.message,
+            rejection_reason: data.rejection_reason ?? null,
+            can_submit_proof: !!data.can_submit_proof,
+        };
+        toast.success('Dados confirmados.');
+    } catch (err) {
+        validated.value = null;
+        const msg = err.data?.message || 'Nao foi possivel validar.';
+        toast.error(msg);
+    } finally {
+        validating.value = false;
+    }
+}
+
+async function submitProof() {
+    if (isExpenseClosed.value || !validated.value?.can_submit_proof) return;
+
+    fieldErrors.value = {};
+    const trimmedName = name.value.trim();
+    const digits = phoneDigits.value;
+
     if (!file.value) {
         fieldErrors.value.file = 'Selecione o comprovante.';
         return;
@@ -131,50 +167,36 @@ async function submit() {
         return;
     }
 
-    submitting.value = true;
+    submittingProof.value = true;
     try {
-        const idRes = await api.post(`/public/expenses/${props.hash}/identify`, {
-            name: trimmedName,
-            phone: phoneDigits,
-        });
+        const formData = new FormData();
+        formData.append('name', trimmedName);
+        formData.append('phone', digits);
+        formData.append('proof', file.value);
 
-        const members = idRes.members || [];
-        if (members.length === 0) {
-            toast.error('Nao foi possivel identificar participante.');
-            return;
-        }
-
-        const member = members[0];
-        const st = member.status;
-
-        if (st === 'proof_sent' || st === 'validated') {
-            if (member.unique_hash) {
-                localStorage.setItem(LS_KEY.value, member.unique_hash);
-            }
-            success.value = true;
-            toast.success('Seu pagamento ja esta registrado.');
-            return;
-        }
-
-        await api.upload(`/public/charges/${member.charge_id}/upload-proof`, file.value, 'file');
-        await api.post(`/public/charges/${member.charge_id}/mark-as-paid`, {});
-
-        if (member.unique_hash) {
-            localStorage.setItem(LS_KEY.value, member.unique_hash);
-        }
-
-        success.value = true;
+        const data = await api.postFormData(`/public/expenses/${props.hash}/submit-proof`, formData);
+        validated.value = {
+            status: data.status,
+            message: data.message,
+            rejection_reason: data.rejection_reason ?? null,
+            can_submit_proof: false,
+        };
+        toast.success(data.message || 'Comprovante enviado.');
         file.value = null;
         if (fileInput.value) fileInput.value.value = '';
-        toast.success('Comprovante enviado!');
     } catch (err) {
-        let msg = err.data?.message;
-        if (!msg && err.data?.errors) {
-            msg = Object.values(err.data.errors).flat().join(' ');
+        const d = err.data || {};
+        if (d.status) {
+            validated.value = {
+                status: d.status,
+                message: d.message,
+                rejection_reason: d.rejection_reason ?? null,
+                can_submit_proof: ['pending', 'rejected'].includes(d.status),
+            };
         }
-        toast.error(msg || 'Nao foi possivel enviar. Tente novamente.');
+        toast.error(d.message || 'Nao foi possivel enviar.');
     } finally {
-        submitting.value = false;
+        submittingProof.value = false;
     }
 }
 </script>
@@ -191,7 +213,6 @@ async function submit() {
     </div>
 
     <div v-else class="space-y-8">
-        <!-- Bloco 1: despesa + PIX -->
         <section class="space-y-4">
             <div class="text-center space-y-1">
                 <p class="text-sm text-gray-600">Valor total</p>
@@ -228,7 +249,6 @@ async function submit() {
             </p>
         </section>
 
-        <!-- Despesa encerrada -->
         <section
             v-if="isExpenseClosed"
             class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-6 text-center space-y-2"
@@ -241,22 +261,11 @@ async function submit() {
             </p>
         </section>
 
-        <!-- Bloco 3: sucesso -->
-        <section
-            v-else-if="success"
-            class="rounded-2xl border border-green-200 bg-green-50 px-4 py-6 text-center space-y-2"
-        >
-            <p class="text-lg font-semibold text-green-900">
-                Comprovante enviado com sucesso!
-            </p>
-            <p class="text-sm text-green-800">
-                Aguardando validacao do responsavel.
-            </p>
-        </section>
-
-        <!-- Bloco 2: formulario -->
         <section v-else class="space-y-4">
-            <h2 class="text-base font-semibold text-gray-900">Seus dados</h2>
+            <h2 class="text-base font-semibold text-gray-900">Participar</h2>
+            <p class="text-xs text-gray-600">
+                Informe <strong>exatamente</strong> o nome e o telefone cadastrados pelo responsavel (telefone pode ser digitado com mascara).
+            </p>
 
             <div>
                 <label for="pe-name" class="block text-sm font-medium text-gray-700 mb-1.5">Nome</label>
@@ -267,6 +276,7 @@ async function submit() {
                     autocomplete="name"
                     class="w-full min-h-[48px] rounded-xl border border-stone-300 px-3 text-base shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                     :class="fieldErrors.name ? 'border-red-400' : ''"
+                    @input="onNameInput"
                 />
                 <p v-if="fieldErrors.name" class="text-sm text-red-600 mt-1">{{ fieldErrors.name }}</p>
             </div>
@@ -287,33 +297,57 @@ async function submit() {
                 <p v-if="fieldErrors.phone" class="text-sm text-red-600 mt-1">{{ fieldErrors.phone }}</p>
             </div>
 
-            <div>
-                <label for="pe-file" class="block text-sm font-medium text-gray-700 mb-1.5">Comprovante</label>
-                <input
-                    id="pe-file"
-                    ref="fileInput"
-                    type="file"
-                    accept="image/jpeg,image/png,image/jpg,application/pdf"
-                    class="block w-full min-h-[48px] text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-4 file:py-2.5 file:text-sm file:font-medium file:text-indigo-800"
-                    :class="fieldErrors.file ? 'text-red-600' : ''"
-                    @change="onFileChange"
-                />
-                <p class="text-xs text-gray-500 mt-1">JPG, PNG ou PDF. Ate 5 MB.</p>
-                <p v-if="fieldErrors.file" class="text-sm text-red-600 mt-1">{{ fieldErrors.file }}</p>
-            </div>
-
             <Button
                 type="button"
-                class="w-full min-h-[52px] text-base font-semibold"
-                :disabled="!canSubmit"
-                :loading="submitting"
-                @click="submit"
+                variant="secondary"
+                class="w-full min-h-[48px] text-base font-semibold"
+                :disabled="!canValidate"
+                :loading="validating"
+                @click="validateParticipant"
             >
-                Enviar comprovante e marcar como pago
+                Validar meus dados
             </Button>
-            <p v-if="!canSubmit && !submitting && !success" class="text-xs text-center text-gray-500">
-                Preencha nome, telefone e anexe o comprovante para habilitar o envio.
-            </p>
+
+            <div
+                v-if="validated"
+                class="rounded-xl border border-stone-200 bg-stone-50 px-3 py-3 text-sm space-y-2"
+            >
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-xs text-gray-600">Status:</span>
+                    <StatusBadge :status="validated.status" />
+                </div>
+                <p class="text-gray-900 font-medium">{{ validated.message }}</p>
+                <p v-if="validated.rejection_reason" class="text-xs text-orange-900 bg-orange-50 rounded-lg px-2 py-1.5">
+                    Motivo da rejeicao: {{ validated.rejection_reason }}
+                </p>
+            </div>
+
+            <template v-if="validated?.can_submit_proof">
+                <div>
+                    <label for="pe-file" class="block text-sm font-medium text-gray-700 mb-1.5">Comprovante</label>
+                    <input
+                        id="pe-file"
+                        ref="fileInput"
+                        type="file"
+                        accept="image/jpeg,image/png,image/jpg,application/pdf"
+                        class="block w-full min-h-[48px] text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-4 file:py-2.5 file:text-sm file:font-medium file:text-indigo-800"
+                        :class="fieldErrors.file ? 'text-red-600' : ''"
+                        @change="onFileChange"
+                    />
+                    <p class="text-xs text-gray-500 mt-1">JPG, PNG ou PDF. Ate 5 MB.</p>
+                    <p v-if="fieldErrors.file" class="text-sm text-red-600 mt-1">{{ fieldErrors.file }}</p>
+                </div>
+
+                <Button
+                    type="button"
+                    class="w-full min-h-[52px] text-base font-semibold"
+                    :disabled="!canSubmitProof"
+                    :loading="submittingProof"
+                    @click="submitProof"
+                >
+                    Enviar comprovante
+                </Button>
+            </template>
         </section>
     </div>
 </template>
