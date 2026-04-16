@@ -22,11 +22,9 @@ class Team extends Model
         return $this->belongsTo(User::class, 'owner_id');
     }
 
-    public function members(): BelongsToMany
+    public function members(): HasMany
     {
-        return $this->belongsToMany(User::class, 'team_members')
-            ->withPivot('role')
-            ->withTimestamps();
+        return $this->hasMany(TeamMember::class);
     }
 
     public function expenses(): HasMany

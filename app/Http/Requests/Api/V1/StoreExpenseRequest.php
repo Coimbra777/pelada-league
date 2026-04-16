@@ -17,6 +17,8 @@ class StoreExpenseRequest extends FormRequest
             'description' => ['required', 'string', 'max:255'],
             'total_amount' => ['required', 'numeric', 'min:5'],
             'due_date' => ['required', 'date', 'after_or_equal:today'],
+            'pix_key' => ['required', 'string', 'max:255'],
+            'pix_qr_code' => ['nullable', 'string'],
         ];
     }
 }

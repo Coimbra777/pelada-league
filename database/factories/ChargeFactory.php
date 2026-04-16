@@ -3,7 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\Charge;
-use App\Models\User;
+use App\Models\TeamMember;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -16,41 +16,28 @@ class ChargeFactory extends Factory
     public function definition(): array
     {
         return [
-            'user_id' => User::factory(),
+            'user_id' => null,
+            'team_member_id' => TeamMember::factory(),
             'description' => fake()->sentence(),
             'amount' => fake()->randomFloat(2, 5, 1000),
             'due_date' => fake()->dateTimeBetween('now', '+30 days')->format('Y-m-d'),
-            'asaas_charge_id' => 'pay_' . fake()->unique()->uuid(),
-            'status' => 'PENDING',
-            'pix_qr_code' => null,
-            'pix_copy_paste' => null,
-            'payment_link' => null,
+            'status' => 'pending',
             'paid_at' => null,
         ];
     }
 
-    public function paid(): static
+    public function proofSent(): static
     {
         return $this->state(fn (array $attributes) => [
-            'status' => 'RECEIVED',
-            'paid_at' => now(),
+            'status' => 'proof_sent',
         ]);
     }
 
-    public function confirmed(): static
+    public function validated(): static
     {
         return $this->state(fn (array $attributes) => [
-            'status' => 'CONFIRMED',
+            'status' => 'validated',
             'paid_at' => now(),
-        ]);
-    }
-
-    public function withPixData(): static
-    {
-        return $this->state(fn (array $attributes) => [
-            'pix_qr_code' => base64_encode('fake-qr-code-image'),
-            'pix_copy_paste' => '00020126580014br.gov.bcb.pix0136' . fake()->uuid(),
-            'payment_link' => 'https://sandbox.asaas.com/i/' . fake()->uuid(),
         ]);
     }
 }

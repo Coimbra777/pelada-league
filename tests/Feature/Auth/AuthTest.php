@@ -13,9 +13,7 @@ class AuthTest extends TestCase
 
     public function test_user_can_register_successfully(): void
     {
-        Http::fake([
-            '*/customers' => Http::response(['id' => 'cus_abc123'], 200),
-        ]);
+        Http::fake();
 
         $response = $this->postJson('/api/v1/auth/register', [
             'name' => 'John Doe',
@@ -34,6 +32,8 @@ class AuthTest extends TestCase
             'email' => 'john@example.com',
             'name' => 'John Doe',
         ]);
+
+        Http::assertNothingSent();
     }
 
     public function test_register_fails_with_duplicate_email(): void
@@ -112,7 +112,7 @@ class AuthTest extends TestCase
 
         $this->assertDatabaseCount('personal_access_tokens', 1);
 
-        $response = $this->withHeader('Authorization', 'Bearer ' . $token)
+        $response = $this->withHeader('Authorization', 'Bearer '.$token)
             ->postJson('/api/v1/auth/logout');
 
         $response->assertOk()
@@ -121,11 +121,9 @@ class AuthTest extends TestCase
         $this->assertDatabaseCount('personal_access_tokens', 0);
     }
 
-    public function test_register_creates_asaas_customer(): void
+    public function test_register_persists_profile_fields(): void
     {
-        Http::fake([
-            '*/customers' => Http::response(['id' => 'cus_abc123'], 200),
-        ]);
+        Http::fake();
 
         $response = $this->postJson('/api/v1/auth/register', [
             'name' => 'John Doe',
@@ -140,15 +138,15 @@ class AuthTest extends TestCase
 
         $this->assertDatabaseHas('users', [
             'email' => 'john@example.com',
-            'asaas_customer_id' => 'cus_abc123',
+            'phone' => '11999999999',
         ]);
+
+        Http::assertNothingSent();
     }
 
-    public function test_register_succeeds_even_if_asaas_fails(): void
+    public function test_register_minimal_succeeds(): void
     {
-        Http::fake([
-            '*/customers' => Http::response(['error' => 'Internal Server Error'], 500),
-        ]);
+        Http::fake();
 
         $response = $this->postJson('/api/v1/auth/register', [
             'name' => 'John Doe',
@@ -162,44 +160,7 @@ class AuthTest extends TestCase
 
         $this->assertDatabaseHas('users', [
             'email' => 'john@example.com',
-            'asaas_customer_id' => null,
         ]);
-    }
-
-    public function test_register_sends_correct_payload_to_asaas(): void
-    {
-        Http::fake([
-            '*/customers' => Http::response(['id' => 'cus_xyz789'], 200),
-        ]);
-
-        $this->postJson('/api/v1/auth/register', [
-            'name' => 'Maria Silva',
-            'email' => 'maria@example.com',
-            'password' => 'password123',
-            'password_confirmation' => 'password123',
-            'cpf' => '98765432100',
-            'phone' => '21888888888',
-        ]);
-
-        Http::assertSent(function ($request) {
-            return $request->url() === config('services.asaas.base_url') . '/customers'
-                && $request['name'] === 'Maria Silva'
-                && $request['email'] === 'maria@example.com'
-                && $request['cpfCnpj'] === '98765432100'
-                && $request['mobilePhone'] === '21888888888';
-        });
-    }
-
-    public function test_asaas_customer_is_not_created_when_already_exists(): void
-    {
-        Http::fake();
-
-        $user = User::factory()->create(['asaas_customer_id' => 'cus_existing']);
-
-        $service = app(\App\Services\Asaas\AsaasCustomerService::class);
-        $customerId = $service->create($user);
-
-        $this->assertEquals('cus_existing', $customerId);
 
         Http::assertNothingSent();
     }

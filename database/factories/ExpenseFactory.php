@@ -19,10 +19,17 @@ class ExpenseFactory extends Factory
         return [
             'team_id' => Team::factory(),
             'created_by' => User::factory(),
+            'owner_name' => null,
+            'owner_phone' => null,
             'description' => fake()->sentence(),
             'total_amount' => fake()->randomFloat(2, 10, 5000),
             'due_date' => fake()->dateTimeBetween('now', '+30 days')->format('Y-m-d'),
             'status' => 'open',
+            'public_hash' => fake()->uuid(),
+            'manage_token' => fake()->uuid(),
+            'amount_per_member' => null,
+            'pix_key' => null,
+            'pix_qr_code' => null,
         ];
     }
 
@@ -30,6 +37,14 @@ class ExpenseFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'status' => 'closed',
+        ]);
+    }
+
+    public function withPix(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'pix_key' => '11999999999',
+            'pix_qr_code' => base64_encode('fake-qr'),
         ]);
     }
 }

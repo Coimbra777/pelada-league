@@ -1,4 +1,2 @@
-import axios from 'axios';
-window.axios = axios;
-
-window.axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest';
+// Bootstrap file - minimal setup.
+// HTTP requests are handled by Services/api.js using fetch.

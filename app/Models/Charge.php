@@ -5,24 +5,38 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Charge extends Model
 {
     use HasFactory;
 
+    public const STATUSES = ['pending', 'proof_sent', 'validated', 'rejected'];
+
     protected $fillable = [
         'user_id',
+        'team_member_id',
         'expense_id',
         'description',
         'amount',
         'due_date',
-        'asaas_charge_id',
         'status',
-        'pix_qr_code',
-        'pix_copy_paste',
-        'payment_link',
+        'rejection_reason',
         'paid_at',
     ];
+
+    protected static function booted(): void
+    {
+        static::saving(function (Charge $charge) {
+            if (! in_array($charge->status, self::STATUSES, true)) {
+                throw new \DomainException('Status de cobranca invalido: '.$charge->status);
+            }
+
+            if ($charge->status !== 'rejected') {
+                $charge->rejection_reason = null;
+            }
+        });
+    }
 
     protected function casts(): array
     {
@@ -41,5 +55,20 @@ class Charge extends Model
     public function expense(): BelongsTo
     {
         return $this->belongsTo(Expense::class);
+    }
+
+    public function teamMember(): BelongsTo
+    {
+        return $this->belongsTo(TeamMember::class);
+    }
+
+    public function paymentProofs(): HasMany
+    {
+        return $this->hasMany(PaymentProof::class);
+    }
+
+    public function latestProof(): ?PaymentProof
+    {
+        return $this->paymentProofs()->latest()->first();
     }
 }

@@ -3,7 +3,10 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\AddTeamExpenseParticipantsRequest;
 use App\Http\Requests\Api\V1\StoreExpenseRequest;
+use App\Http\Requests\Api\V1\UpdateExpenseRequest;
+use App\Http\Resources\ChargeResource;
 use App\Http\Resources\ExpenseResource;
 use App\Models\Expense;
 use App\Models\Team;
@@ -19,7 +22,7 @@ class ExpenseController extends Controller
         $user = Auth::user();
 
         $membership = $team->members()->where('user_id', $user->id)->first();
-        if (!$membership || $membership->pivot->role !== 'admin') {
+        if (!$membership || $membership->role !== 'admin') {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -63,10 +66,73 @@ class ExpenseController extends Controller
             return response()->json(['message' => 'Not found.'], 404);
         }
 
-        $expense->load('charges.user');
+        $expense->load('charges.teamMember', 'charges.paymentProofs');
 
         return response()->json([
             'expense' => new ExpenseResource($expense),
+        ]);
+    }
+
+    public function update(UpdateExpenseRequest $request, Team $team, Expense $expense, ExpenseService $expenseService): JsonResponse
+    {
+        try {
+            $expense = $expenseService->updateExpense($expense, $request->validated());
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'expense' => new ExpenseResource($expense),
+        ]);
+    }
+
+    public function addParticipants(AddTeamExpenseParticipantsRequest $request, Team $team, Expense $expense, ExpenseService $expenseService): JsonResponse
+    {
+        try {
+            $expense = $expenseService->addParticipantsToExpense(
+                $team,
+                $expense,
+                $request->input('participants', [])
+            );
+        } catch (\DomainException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'expense' => new ExpenseResource($expense),
+        ]);
+    }
+
+    public function showDirect(Expense $expense): JsonResponse
+    {
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+
+        if (!$expense->team->members()->where('user_id', $user->id)->exists()) {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        $expense->load('charges.teamMember', 'charges.paymentProofs');
+
+        return response()->json([
+            'expense' => new ExpenseResource($expense),
+        ]);
+    }
+
+    public function members(Expense $expense): JsonResponse
+    {
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+
+        $membership = $expense->team->members()->where('user_id', $user->id)->first();
+        if (!$membership || $membership->role !== 'admin') {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+
+        $expense->load('charges.teamMember', 'charges.paymentProofs');
+
+        return response()->json([
+            'charges' => ChargeResource::collection($expense->charges),
         ]);
     }
 }

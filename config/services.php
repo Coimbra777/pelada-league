@@ -35,10 +35,10 @@ return [
         ],
     ],
 
-    'asaas' => [
-        'base_url' => env('ASAAS_API_URL', 'https://sandbox.asaas.com/api/v3'),
-        'api_key' => env('ASAAS_API_KEY'),
-        'webhook_token' => env('ASAAS_WEBHOOK_TOKEN'),
+    'whatsapp' => [
+        'api_url' => env('WHATSAPP_API_URL', ''),
+        'api_token' => env('WHATSAPP_API_TOKEN', ''),
+        'timeout' => (int) env('WHATSAPP_TIMEOUT', 10),
     ],
 
 ];

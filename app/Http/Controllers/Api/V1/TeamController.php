@@ -8,6 +8,7 @@ use App\Http\Resources\TeamMemberResource;
 use App\Http\Resources\TeamResource;
 use App\Models\Charge;
 use App\Models\Team;
+use App\Models\TeamMember;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 
@@ -23,7 +24,14 @@ class TeamController extends Controller
             'owner_id' => $user->id,
         ]);
 
-        $team->members()->attach($user->id, ['role' => 'admin']);
+        TeamMember::create([
+            'team_id' => $team->id,
+            'user_id' => $user->id,
+            'name' => $user->name,
+            'phone' => $user->phone ?? '',
+            'email' => $user->email,
+            'role' => 'admin',
+        ]);
 
         return response()->json([
             'team' => new TeamResource($team->loadCount('members')),
@@ -35,7 +43,8 @@ class TeamController extends Controller
         /** @var \App\Models\User $user */
         $user = Auth::user();
 
-        $teams = $user->teams()->withCount('members')->get();
+        $teamIds = TeamMember::where('user_id', $user->id)->pluck('team_id');
+        $teams = Team::whereIn('id', $teamIds)->withCount('members')->get();
 
         return response()->json([
             'teams' => TeamResource::collection($teams),
@@ -47,7 +56,7 @@ class TeamController extends Controller
         /** @var \App\Models\User $user */
         $user = Auth::user();
 
-        if (!$team->members()->where('user_id', $user->id)->exists()) {
+        if (! $team->members()->where('user_id', $user->id)->exists()) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
@@ -64,19 +73,19 @@ class TeamController extends Controller
         /** @var \App\Models\User $user */
         $user = Auth::user();
 
-        if (!$team->members()->where('user_id', $user->id)->exists()) {
+        if (! $team->members()->where('user_id', $user->id)->exists()) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
         $expenseIds = $team->expenses()->pluck('id');
         $charges = Charge::whereIn('expense_id', $expenseIds)->get();
 
-        $paidStatuses = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'];
+        $paidStatuses = ['validated'];
 
         $totalOpen = $charges->reject(fn ($c) => in_array($c->status, $paidStatuses))->sum('amount');
         $totalPaid = $charges->filter(fn ($c) => in_array($c->status, $paidStatuses))->sum('amount');
-        $membersPaid = $charges->filter(fn ($c) => in_array($c->status, $paidStatuses))->unique('user_id')->count();
-        $membersPending = $charges->reject(fn ($c) => in_array($c->status, $paidStatuses))->unique('user_id')->count();
+        $membersPaid = $charges->filter(fn ($c) => in_array($c->status, $paidStatuses))->unique('team_member_id')->count();
+        $membersPending = $charges->reject(fn ($c) => in_array($c->status, $paidStatuses))->unique('team_member_id')->count();
 
         return response()->json([
             'total_expenses' => $team->expenses()->count(),
