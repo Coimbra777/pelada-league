@@ -9,6 +9,7 @@ use App\Models\TeamMember;
 use App\Models\User;
 use App\Support\ChargeStatusTransition;
 use App\Support\PhoneNormalizer;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -92,32 +93,35 @@ class ExpenseService
 
         $oldTotal = (float) $expense->total_amount;
         $newTotal = (float) $data['total_amount'];
-
-        $expense->update([
-            'description' => $data['description'],
-            'total_amount' => $data['total_amount'],
-            'due_date' => $data['due_date'],
-            'pix_key' => $data['pix_key'],
-            'pix_qr_code' => $data['pix_qr_code'] ?? null,
-        ]);
-
         $totalChanged = abs($newTotal - $oldTotal) > 0.001;
 
-        if ($totalChanged) {
-            if ($expense->charges()->where('status', '!=', 'pending')->exists()) {
-                throw new \DomainException(
-                    'Nao e possivel alterar o valor total enquanto houver cobranca com status diferente de pendente.'
-                );
-            }
-            $this->redistributeChargeAmounts($expense->fresh());
-        } else {
-            $expense->charges()->update([
-                'description' => $expense->description,
-                'due_date' => $expense->due_date,
-            ]);
+        if ($totalChanged && $expense->charges()->where('status', '!=', 'pending')->exists()) {
+            throw new \DomainException(
+                'Nao e possivel alterar o valor total enquanto houver cobranca com status diferente de pendente.'
+            );
         }
 
-        return $expense->fresh()->load('charges.teamMember');
+        return DB::transaction(function () use ($expense, $data, $totalChanged) {
+            $expense->update([
+                'description' => $data['description'],
+                'total_amount' => $data['total_amount'],
+                'due_date' => $data['due_date'],
+                'pix_key' => $data['pix_key'],
+                'pix_qr_code' => $data['pix_qr_code'] ?? null,
+            ]);
+            $expense->refresh();
+
+            if ($totalChanged) {
+                $this->redistributeChargeAmounts($expense);
+            } else {
+                $expense->charges()->update([
+                    'description' => $expense->description,
+                    'due_date' => $expense->due_date,
+                ]);
+            }
+
+            return $expense->fresh()->load('charges.teamMember');
+        });
     }
 
     /**
