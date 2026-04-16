@@ -2,12 +2,13 @@
 
 namespace App\Http\Requests\Api\V1;
 
-use App\Support\ParticipantListParser;
-use App\Support\PhoneNormalizer;
+use App\Http\Requests\Concerns\NormalizesParticipantFormInput;
 use Illuminate\Foundation\Http\FormRequest;
 
 class AddPublicExpenseParticipantsRequest extends FormRequest
 {
+    use NormalizesParticipantFormInput;
+
     public function authorize(): bool
     {
         return true;
@@ -25,38 +26,12 @@ class AddPublicExpenseParticipantsRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $fromArray = [];
-        $participants = $this->input('participants');
-        if (is_array($participants)) {
-            foreach ($participants as $p) {
-                if (! is_array($p)) {
-                    continue;
-                }
-                $fromArray[] = [
-                    'name' => trim((string) ($p['name'] ?? '')),
-                    'phone' => PhoneNormalizer::digits($p['phone'] ?? ''),
-                ];
-            }
-        }
-
-        $fromText = ParticipantListParser::parse((string) $this->input('participants_text', ''));
-
-        $merged = [];
-        $seen = [];
-        foreach (array_merge($fromArray, $fromText) as $item) {
-            $phone = $item['phone'] ?? '';
-            $name = $item['name'] ?? '';
-            if ($phone === '' || strlen($phone) < 10 || $name === '') {
-                continue;
-            }
-            if (isset($seen[$phone])) {
-                continue;
-            }
-            $seen[$phone] = true;
-            $merged[] = ['name' => $name, 'phone' => $phone];
-        }
-
-        $this->merge(['participants' => $merged]);
+        $this->merge([
+            'participants' => $this->buildNormalizedParticipantsList(
+                $this->input('participants'),
+                (string) $this->input('participants_text', ''),
+            ),
+        ]);
     }
 
     public function withValidator($validator): void

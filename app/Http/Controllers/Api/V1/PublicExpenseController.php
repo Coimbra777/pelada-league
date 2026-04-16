@@ -133,19 +133,22 @@ class PublicExpenseController extends Controller
         if (array_key_exists('pix_qr_code', $data)) {
             $payload['pix_qr_code'] = $data['pix_qr_code'];
         }
-        $expense->update($payload);
-        $expense->refresh();
 
-        if ($totalChanged) {
-            $expenseService->redistributeChargeAmounts($expense);
-        } else {
-            $expense->charges()->update([
-                'description' => $expense->description,
-                'due_date' => $expense->due_date,
-            ]);
-        }
+        DB::transaction(function () use ($expense, $payload, $totalChanged, $expenseService) {
+            $expense->update($payload);
+            $expense->refresh();
 
-        $expense->load(['charges.teamMember', 'charges.paymentProofs']);
+            if ($totalChanged) {
+                $expenseService->redistributeChargeAmounts($expense);
+            } else {
+                $expense->charges()->update([
+                    'description' => $expense->description,
+                    'due_date' => $expense->due_date,
+                ]);
+            }
+        });
+
+        $expense->refresh()->load(['charges.teamMember', 'charges.paymentProofs']);
 
         return response()->json([
             'expense' => new PublicExpenseResource($expense),
