@@ -5,14 +5,11 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Concerns\AuthorizesPublicExpense;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\AddPublicExpenseParticipantsRequest;
-use App\Http\Requests\Api\V1\IdentifyMemberRequest;
 use App\Http\Requests\Api\V1\StorePublicExpenseRequest;
 use App\Http\Requests\Api\V1\SubmitPublicProofRequest;
 use App\Http\Requests\Api\V1\UpdatePublicExpenseRequest;
-use App\Http\Requests\Api\V1\UploadProofRequest;
 use App\Http\Requests\Api\V1\ValidateParticipantPublicRequest;
 use App\Http\Resources\CreatedPublicExpenseResource;
-use App\Http\Resources\PaymentProofResource;
 use App\Http\Resources\PublicExpenseResource;
 use App\Models\Charge;
 use App\Models\Expense;
@@ -326,156 +323,6 @@ class PublicExpenseController extends Controller
         ], 201);
     }
 
-    public function showParticipant(string $hash, string $participantHash): JsonResponse
-    {
-        $expense = Expense::byHash($hash)->first();
-
-        if (! $expense) {
-            return response()->json(['message' => 'Not found.'], 404);
-        }
-
-        $member = TeamMember::query()
-            ->where('unique_hash', $participantHash)
-            ->where('team_id', $expense->team_id)
-            ->first();
-
-        if (! $member) {
-            return response()->json(['message' => 'Not found.'], 404);
-        }
-
-        $charge = $expense->charges()->where('team_member_id', $member->id)->first();
-
-        if (! $charge) {
-            return response()->json(['message' => 'Not found.'], 404);
-        }
-
-        $expense->load('charges.teamMember');
-
-        return response()->json([
-            'expense' => [
-                'id' => $expense->id,
-                'description' => $expense->description,
-                'total_amount' => $expense->total_amount,
-                'amount_per_member' => $expense->amount_per_member,
-                'due_date' => $expense->due_date,
-                'status' => $expense->status,
-                'is_closed' => $expense->status === 'closed',
-                'pix_key' => $expense->pix_key,
-                'pix_qr_code' => $expense->pix_qr_code,
-            ],
-            'participant' => [
-                'id' => $member->id,
-                'name' => $member->name,
-                'phone' => $member->phone,
-            ],
-            'charge' => [
-                'id' => $charge->id,
-                'amount' => $charge->amount,
-                'status' => $charge->status,
-                'rejection_reason' => $charge->rejection_reason,
-            ],
-            'members' => $expense->charges->map(fn ($c) => [
-                'id' => $c->teamMember?->id,
-                'name' => $c->teamMember?->name,
-                'phone' => $c->teamMember?->phone,
-                'charge_id' => $c->id,
-                'charge_status' => $c->status,
-                'amount' => $c->amount,
-            ]),
-        ]);
-    }
-
-    public function identify(IdentifyMemberRequest $request, string $hash): JsonResponse
-    {
-        $expense = Expense::byHash($hash)->first();
-
-        if (! $expense) {
-            return response()->json(['message' => 'Not found.'], 404);
-        }
-
-        if ($blocked = $this->rejectIfClosed($expense)) {
-            return $blocked;
-        }
-
-        $validated = $request->validated();
-        $name = $validated['name'];
-        $phoneRaw = $validated['phone'];
-
-        try {
-            $charge = $this->locateParticipantChargeForPublicExpense($expense, $name, $phoneRaw);
-        } catch (\DomainException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        }
-
-        return response()->json([
-            'members' => [[
-                'member_id' => $charge->teamMember?->id,
-                'unique_hash' => $charge->teamMember?->unique_hash,
-                'name' => $charge->teamMember?->name,
-                'phone' => $charge->teamMember?->phone,
-                'charge_id' => $charge->id,
-                'amount' => $charge->amount,
-                'status' => $charge->status,
-                'rejection_reason' => $charge->rejection_reason,
-            ]],
-        ]);
-    }
-
-    public function uploadProof(UploadProofRequest $request, Charge $charge, PaymentProofService $service): JsonResponse
-    {
-        if (! $charge->expense?->public_hash) {
-            return response()->json(['message' => 'Not found.'], 404);
-        }
-
-        if ($blocked = $this->rejectIfClosed($charge->expense)) {
-            return $blocked;
-        }
-
-        try {
-            $proof = $service->uploadProof($charge, $request->file('file'));
-
-            return response()->json([
-                'proof' => new PaymentProofResource($proof),
-            ], 201);
-        } catch (\DomainException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        }
-    }
-
-    public function markAsPaid(Charge $charge): JsonResponse
-    {
-        if (! $charge->expense?->public_hash) {
-            return response()->json(['message' => 'Not found.'], 404);
-        }
-
-        if ($blocked = $this->rejectIfClosed($charge->expense)) {
-            return $blocked;
-        }
-
-        if (! $charge->paymentProofs()->exists()) {
-            return response()->json(['message' => 'Upload a proof before marking as paid.'], 422);
-        }
-
-        if ($charge->status === 'proof_sent') {
-            return response()->json(['message' => 'Aguardando aprovacao do responsavel.'], 422);
-        }
-
-        if ($charge->status !== 'pending') {
-            return response()->json([
-                'message' => 'Envie um novo comprovante antes de marcar como pago (cobranca nao esta pendente).',
-            ], 422);
-        }
-
-        ChargeStatusTransition::assertTransition($charge->status, 'proof_sent');
-
-        $charge->update(['status' => 'proof_sent']);
-
-        return response()->json([
-            'message' => 'Marked as paid. Waiting for admin validation.',
-            'status' => 'proof_sent',
-        ]);
-    }
-
     public function validateCharge(Request $request, Charge $charge): JsonResponse
     {
         $expense = $this->authorizeManage($request, $charge->expense);
@@ -493,7 +340,7 @@ class PublicExpenseController extends Controller
 
         if ($charge->status !== 'proof_sent') {
             $message = match ($charge->status) {
-                'rejected' => 'Comprovante rejeitado. O participante precisa enviar um novo comprovante e marcar como pago antes da validacao.',
+                'rejected' => 'Comprovante rejeitado. O participante precisa enviar um novo comprovante pelo link da despesa antes da validacao.',
                 default => 'So e possivel validar apos o participante enviar o comprovante e marcar como pago (status aguardando aprovacao).',
             };
 
@@ -590,49 +437,6 @@ class PublicExpenseController extends Controller
         return Storage::disk('local')->download($proof->file_path, $proof->original_filename);
     }
 
-    public function resendParticipantLink(Request $request, string $hash, TeamMember $member): JsonResponse
-    {
-        $expense = Expense::byHash($hash)->first();
-        if (! $expense) {
-            return response()->json(['message' => 'Not found.'], 404);
-        }
-
-        $auth = $this->authorizeManageToken($request, $expense);
-        if ($auth instanceof JsonResponse) {
-            return $auth;
-        }
-
-        if ($blocked = $this->rejectIfClosed($expense)) {
-            return $blocked;
-        }
-
-        if ((int) $member->team_id !== (int) $expense->team_id) {
-            return response()->json(['message' => 'Not found.'], 404);
-        }
-
-        $charge = $expense->charges()->where('team_member_id', $member->id)->first();
-        if (! $charge) {
-            return response()->json(['message' => 'Not found.'], 404);
-        }
-
-        if ($charge->status === 'validated') {
-            return response()->json(['message' => 'Participante ja validado.'], 422);
-        }
-
-        $member->update([
-            'unique_hash' => (string) Str::uuid(),
-        ]);
-        $member->refresh();
-
-        $link = rtrim((string) config('app.url'), '/').'/p/'.$expense->public_hash.'/'.$member->unique_hash;
-        $message = "Fala! Falta voce pagar a despesa:\n\n{$expense->description}\nValor: R$ ".number_format((float) $charge->amount, 2, ',', '.')."\n\nPague aqui:\n{$link}";
-
-        return response()->json([
-            'link' => $link,
-            'message' => $message,
-        ]);
-    }
-
     /**
      * Nome (trim) e telefone (só dígitos) devem coincidir exatamente com o cadastro. Não altera dados.
      */
@@ -671,55 +475,5 @@ class PublicExpenseController extends Controller
             'validated' => 'Pagamento já confirmado.',
             default => 'Status desconhecido.',
         };
-    }
-
-    /**
-     * Localiza cobrança por nome + telefone (mesma regra do identify), sem criar participante.
-     *
-     * @throws \DomainException
-     */
-    private function locateParticipantChargeForPublicExpense(Expense $expense, string $name, string $phoneRaw): Charge
-    {
-        $phoneDigits = preg_replace('/\D+/', '', $phoneRaw) ?? '';
-
-        if ($phoneDigits === '' || strlen($phoneDigits) < 10) {
-            throw new \DomainException('Informe um telefone valido (min. 10 digitos).');
-        }
-
-        $charges = $expense->charges()
-            ->with('teamMember')
-            ->get()
-            ->filter(function (Charge $charge) use ($phoneDigits) {
-                $m = $charge->teamMember;
-
-                return $m && preg_replace('/\D+/', '', (string) $m->phone) === $phoneDigits;
-            })
-            ->values();
-
-        if ($charges->isEmpty()) {
-            $charges = $expense->charges()
-                ->whereHas('teamMember', function ($q) use ($name) {
-                    $q->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($name).'%']);
-                })
-                ->with('teamMember')
-                ->get();
-
-            if ($charges->count() > 1 && $phoneDigits !== '') {
-                $narrowed = $charges->filter(function (Charge $charge) use ($phoneDigits) {
-                    $m = $charge->teamMember;
-
-                    return $m && preg_replace('/\D+/', '', (string) $m->phone) === $phoneDigits;
-                });
-                if ($narrowed->isNotEmpty()) {
-                    $charges = $narrowed->values();
-                }
-            }
-        }
-
-        if ($charges->isEmpty()) {
-            throw new \DomainException('Participante não encontrado.');
-        }
-
-        return $charges->first();
     }
 }

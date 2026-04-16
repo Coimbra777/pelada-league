@@ -4,8 +4,6 @@ import { api } from '../Services/api.js';
 export const usePublicExpenseStore = defineStore('publicExpense', {
     state: () => ({
         expense: null,
-        participantBundle: null,
-        selectedMember: null,
         loading: false,
         error: null,
     }),
@@ -13,8 +11,6 @@ export const usePublicExpenseStore = defineStore('publicExpense', {
     actions: {
         reset() {
             this.expense = null;
-            this.participantBundle = null;
-            this.selectedMember = null;
             this.error = null;
         },
 
@@ -33,65 +29,12 @@ export const usePublicExpenseStore = defineStore('publicExpense', {
             }
         },
 
-        async fetchParticipantBundle(expenseHash, participantHash) {
-            this.loading = true;
-            this.error = null;
-            try {
-                const data = await api.get(`/public/expenses/${expenseHash}/participants/${participantHash}`);
-                this.participantBundle = data;
-                this.expense = data.expense;
-            } catch (err) {
-                this.error = err.data?.message || 'Erro ao carregar.';
-                throw err;
-            } finally {
-                this.loading = false;
-            }
-        },
-
-        selectMember(member) {
-            this.selectedMember = member;
-        },
-
-        async uploadProof(chargeId, file) {
-            this.loading = true;
-            this.error = null;
-            try {
-                const data = await api.upload(`/public/charges/${chargeId}/upload-proof`, file);
-                return data.proof;
-            } catch (err) {
-                this.error = err.data?.message || 'Falha ao enviar comprovante.';
-                throw err;
-            } finally {
-                this.loading = false;
-            }
-        },
-
-        async markAsPaid(chargeId) {
-            this.loading = true;
-            this.error = null;
-            try {
-                const data = await api.post(`/public/charges/${chargeId}/mark-as-paid`);
-                return data;
-            } catch (err) {
-                this.error = err.data?.message || 'Falha ao confirmar.';
-                throw err;
-            } finally {
-                this.loading = false;
-            }
-        },
-
         async validateCharge(chargeId, manageToken) {
             return api.patch(`/public/charges/${chargeId}/validate`, { manage_token: manageToken });
         },
 
         async rejectCharge(chargeId, manageToken) {
             return api.patch(`/public/charges/${chargeId}/reject`, { manage_token: manageToken });
-        },
-
-        async resendParticipantLink(expenseHash, memberId, manageToken) {
-            return api.post(`/public/expenses/${expenseHash}/participants/${memberId}/resend-link`, {
-                manage_token: manageToken,
-            });
         },
 
         async patchExpense(hash, manageToken, payload) {

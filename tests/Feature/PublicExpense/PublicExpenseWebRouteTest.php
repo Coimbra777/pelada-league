@@ -34,6 +34,16 @@ class PublicExpenseWebRouteTest extends TestCase
         $response->assertOk();
     }
 
+    public function test_legacy_two_segment_participant_path_redirects_to_single_link(): void
+    {
+        $expenseHash = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+        $legacyParticipant = 'qualquer-hash-antigo';
+
+        $response = $this->get("/p/{$expenseHash}/{$legacyParticipant}");
+
+        $response->assertRedirect("/p/{$expenseHash}");
+    }
+
     public function test_redirect_response_does_not_contain_expense_not_found_message(): void
     {
         $hash = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';

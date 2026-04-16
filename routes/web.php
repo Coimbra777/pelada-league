@@ -55,12 +55,10 @@ Route::get('/public/expenses/{hash}', function (Request $request, string $hash) 
     ]);
 })->name('public.expense');
 
+/** Links antigos por participante: redireciona para o fluxo único /p/{hash} (nome + telefone). */
 Route::get('/p/{expenseHash}/{participantHash}', function (string $expenseHash, string $participantHash) {
-    return Inertia::render('Public/Participant', [
-        'expenseHash' => $expenseHash,
-        'participantHash' => $participantHash,
-    ]);
-})->name('public.participant.invite');
+    return redirect("/p/{$expenseHash}", 302);
+});
 
 Route::get('/p/{hash}', function (string $hash) {
     return Inertia::render('Public/ParticipantEntry', [

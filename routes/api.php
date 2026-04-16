@@ -27,16 +27,11 @@ Route::prefix('v1')->group(function () {
         Route::patch('/expenses/{hash}/close', [PublicExpenseController::class, 'closeExpense']);
         Route::patch('/expenses/{hash}', [PublicExpenseController::class, 'updateExpense']);
         Route::post('/expenses/{hash}/participants', [PublicExpenseController::class, 'addParticipants']);
-        Route::get('/expenses/{hash}/participants/{participantHash}', [PublicExpenseController::class, 'showParticipant']);
-        Route::post('/expenses/{hash}/identify', [PublicExpenseController::class, 'identify']);
         Route::post('/expenses/{hash}/validate-participant', [PublicExpenseController::class, 'validateParticipantPublic']);
         Route::post('/expenses/{hash}/submit-proof', [PublicExpenseController::class, 'submitProofPublic']);
-        Route::post('/charges/{charge}/upload-proof', [PublicExpenseController::class, 'uploadProof']);
-        Route::post('/charges/{charge}/mark-as-paid', [PublicExpenseController::class, 'markAsPaid']);
         Route::patch('/charges/{charge}/validate', [PublicExpenseController::class, 'validateCharge']);
         Route::patch('/charges/{charge}/reject', [PublicExpenseController::class, 'rejectCharge']);
         Route::get('/charges/{charge}/proof', [PublicExpenseController::class, 'downloadProof']);
-        Route::post('/expenses/{hash}/participants/{member}/resend-link', [PublicExpenseController::class, 'resendParticipantLink']);
     });
 
     Route::middleware('auth:sanctum')->group(function () {

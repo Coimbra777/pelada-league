@@ -45,7 +45,6 @@ class PublicExpenseResource extends JsonResource
                     'charge_id' => $charge->id,
                     'charge_status' => $charge->status,
                     'amount' => $charge->amount,
-                    'participant_url' => $member?->unique_hash ? $this->participantUrl($member->unique_hash) : null,
                 ];
             })),
         ];
@@ -73,10 +72,5 @@ class PublicExpenseResource extends JsonResource
                 ];
             })),
         ];
-    }
-
-    private function participantUrl(string $participantHash): string
-    {
-        return rtrim((string) config('app.url'), '/').'/p/'.$this->public_hash.'/'.$participantHash;
     }
 }

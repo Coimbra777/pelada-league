@@ -15,12 +15,8 @@ class NotificationTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_whatsapp_stub_logs_message(): void
+    public function test_whatsapp_stub_returns_false_when_api_url_not_configured(): void
     {
-        Log::shouldReceive('info')
-            ->once()
-            ->withArgs(fn ($msg) => str_contains($msg, 'WhatsApp stub'));
-
         $helper = new ApiWhatsappHelper;
         $result = $helper->send('11999999999', 'Test message');
 

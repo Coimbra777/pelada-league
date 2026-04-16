@@ -238,12 +238,6 @@ async function submitAddParticipants() {
     }
 }
 
-async function copyParticipantUrl(url) {
-    if (!url) return;
-    await copy(url);
-    toast.success('Link copiado.');
-}
-
 function onProofFileChange(ev) {
     const f = ev.target.files?.[0];
     proofFile.value = f || null;
@@ -379,17 +373,6 @@ function openProof(chargeId) {
 function closeProof() {
     proofModalOpen.value = false;
     proofChargeId.value = null;
-}
-
-async function resendMember(memberId) {
-    if (!props.manage) return;
-    try {
-        const data = await store.resendParticipantLink(props.hash, memberId, props.manage);
-        await copy(data.message);
-        toast.success('Mensagem copiada! Cole no WhatsApp.');
-    } catch (err) {
-        toast.error(err.data?.message || 'Nao foi possivel gerar o link.');
-    }
 }
 
 function openCloseConfirm() {
@@ -758,13 +741,10 @@ async function confirmCloseExpense() {
                     v-else
                     :members="store.expense.members || []"
                     :is-admin="!!store.expense.can_manage"
-                    :show-resend="!!store.expense.can_manage && moderationEnabled"
                     :moderation-enabled="moderationEnabled"
                     @validate="validateCharge"
                     @reject="rejectCharge"
                     @view-proof="openProof"
-                    @resend="resendMember"
-                    @copy-participant-link="copyParticipantUrl"
                 />
             </Card>
 

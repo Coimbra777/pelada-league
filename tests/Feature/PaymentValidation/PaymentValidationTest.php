@@ -24,7 +24,6 @@ class PaymentValidationTest extends TestCase
 
         TeamMember::create([
             'team_id' => $team->id,
-            'unique_hash' => 'val-participant-admin',
             'user_id' => $admin->id,
             'name' => $admin->name,
             'phone' => '11000000001',
@@ -34,7 +33,6 @@ class PaymentValidationTest extends TestCase
 
         $member = TeamMember::create([
             'team_id' => $team->id,
-            'unique_hash' => 'val-participant-maria',
             'name' => 'Maria',
             'phone' => '11000000002',
             'role' => 'member',
@@ -192,18 +190,14 @@ class PaymentValidationTest extends TestCase
 
         $this->assertDatabaseHas('charges', ['id' => $charge2->id, 'status' => 'rejected']);
 
-        // Upload new proof
         $file = UploadedFile::fake()->create('new_proof.jpg', 100, 'image/jpeg');
-        $response = $this->postJson("/api/v1/public/charges/{$charge2->id}/upload-proof", [
-            'file' => $file,
+        $response = $this->post('/api/v1/public/expenses/val-hash-123/submit-proof', [
+            'name' => 'Maria',
+            'phone' => '11000000002',
+            'proof' => $file,
         ]);
 
-        $response->assertStatus(201);
-
-        // Mark as paid again (rejected charges can be re-submitted)
-        $response = $this->postJson("/api/v1/public/charges/{$charge2->id}/mark-as-paid");
-
-        $response->assertOk()
+        $response->assertStatus(201)
             ->assertJsonPath('status', 'proof_sent');
     }
 }

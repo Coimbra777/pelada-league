@@ -5,7 +5,6 @@ import StatusBadge from './StatusBadge.vue';
 const props = defineProps({
     member: { type: Object, required: true },
     isAdmin: { type: Boolean, default: false },
-    showResend: { type: Boolean, default: false },
     moderationEnabled: { type: Boolean, default: true },
     /** 'admin' no painel do responsável para rótulos de cobrança adequados */
     chargePerspective: {
@@ -15,17 +14,13 @@ const props = defineProps({
     },
 });
 
-const emit = defineEmits(['validate', 'reject', 'viewProof', 'resend', 'copyParticipantLink']);
+const emit = defineEmits(['validate', 'reject', 'viewProof']);
 
 function formatCurrency(value) {
     return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
 const status = computed(() => props.member.charge_status || props.member.status);
-
-const canResend = computed(
-    () => props.showResend && ['pending', 'rejected', 'proof_sent'].includes(status.value),
-);
 
 /** Somente com comprovante aguardando decisão — em `rejected` o participante deve reenviar primeiro. */
 const canValidateOrReject = computed(
@@ -43,25 +38,7 @@ const canValidateOrReject = computed(
             <span class="text-sm font-semibold text-gray-900 whitespace-nowrap">{{ formatCurrency(member.amount) }}</span>
             <StatusBadge :status="status" :charge-perspective="chargePerspective" />
         </div>
-        <div v-if="moderationEnabled && isAdmin && member.participant_url" class="w-full sm:w-auto mt-1 sm:mt-0">
-            <button
-                type="button"
-                class="w-full sm:w-auto px-3 py-2 text-xs font-medium text-gray-700 bg-gray-100 rounded-lg min-h-[44px]"
-                @click="emit('copyParticipantLink', member.participant_url)"
-            >
-                Copiar link individual
-            </button>
-        </div>
-        <div v-if="canResend" class="w-full sm:w-auto mt-1 sm:mt-0">
-            <button
-                type="button"
-                class="w-full sm:w-auto px-3 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-lg min-h-[44px]"
-                @click="emit('resend', member.id)"
-            >
-                Gerar link do participante
-            </button>
-        </div>
-        <div v-if="isAdmin" class="flex flex-wrap gap-1 sm:ml-2 sm:justify-end">
+        <div v-if="isAdmin" class="flex flex-wrap gap-1 sm:ml-2 sm:justify-end w-full sm:w-auto">
             <button
                 v-if="['proof_sent', 'validated', 'rejected'].includes(status)"
                 type="button"
