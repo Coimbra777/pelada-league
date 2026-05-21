@@ -1,294 +1,286 @@
-Você é um Tech Lead especialista em Laravel, React/Vite, segurança web, APIs REST, LGPD e documentação técnica.
+Você é um Tech Lead responsável por documentar um sistema completo para estudo, portfólio e evolução futura.
 
 Objetivo:
+Criar documentação completa dentro da pasta /doc com foco em:
 
-1. Fazer um review completo de segurança do projeto, tanto backend quanto frontend.
-2. Verificar se o projeto está coerente para fechar o MVP.
-3. Ajustar a documentação, especialmente o README.md, para manter apenas procedimentos claros para rodar o projeto localmente.
+- entendimento do sistema
+- arquitetura
+- decisões técnicas
+- padrões utilizados
+- segurança
+- fluxo de negócio
+- evolução futura
 
-Importante:
+IMPORTANTE:
 
-- Primeiro faça o review.
-- Depois corrija apenas problemas objetivos e seguros.
-- Não implemente features novas.
-- Não altere regra de negócio sem necessidade.
-- Não quebre testes existentes.
-
----
-
-# 1. Review de segurança backend
-
-Analise:
-
-## Autenticação
-
-- Sanctum;
-- expiração de token;
-- logout/revogação;
-- endpoints protegidos;
-- resposta de erro 401.
-
-## Autorização
-
-- usuário só acessa suas próprias cobranças;
-- participante público só acessa o que deve;
-- gestor público depende de manage_token;
-- rotas públicas não vazam dados sensíveis.
-
-## manage_token
-
-- verificar se ainda é aceito por query string ou body;
-- ideal: aceitar somente header X-Manage-Token;
-- verificar se não aparece em URL, logs ou resposta indevida;
-- revisar uso em PublicExpenseResource, controllers e frontend.
-
-## Uploads/comprovantes
-
-- storage privado;
-- validação de extensão;
-- validação por magic bytes;
-- limite de tamanho;
-- path seguro;
-- agrupamento por expense;
-- nome sem dados sensíveis de nome;
-- exclusão ao fechar cobrança;
-- reenvio após rejeição remove arquivo antigo;
-- preview/download bloqueado após fechamento.
-
-## Validações
-
-- telefone BR;
-- data de vencimento;
-- valores;
-- participantes obrigatórios;
-- soma >= total;
-- mensagens PT-BR;
-- erros com code estável.
-
-## API
-
-- envelope padrão;
-- errors por campo;
-- status HTTP corretos;
-- CORS;
-- rate limiting;
-- headers de segurança;
-- CSP/HSTS.
-
-## LGPD
-
-- confirmar que CPF não é mais coletado;
-- confirmar que CPF não é exposto;
-- confirmar que nomes/telefones não vazam para visitante comum;
-- confirmar que comprovantes são temporários;
-- verificar documentação sobre retenção/exclusão.
+- Não inventar nada que não exista no código
+- Basear tudo em arquivos reais
+- Usar linguagem clara e didática
+- Pensar em alguém que vai estudar o projeto depois
+- Não alterar código, apenas gerar documentação
 
 ---
 
-# 2. Review de segurança frontend
+# Estrutura da documentação
 
-Analise:
+Criar os arquivos:
 
-## Auth
+doc/
 
-- armazenamento do token;
-- limpeza de sessão;
-- logout;
-- fluxo demo separado;
-- login real não mistura com demo.
-
-## Rotas públicas
-
-- não enviar Bearer token para endpoints públicos;
-- manage_token enviado somente via header;
-- participante não vê nome real do organizador;
-- participante não vê lista completa indevida.
-
-## Formulários
-
-- sem alert();
-- erros por campo;
-- validação antes de submit;
-- mensagens PT-BR;
-- telefone inválido visível;
-- data vencida visível;
-- valores faltantes/excedentes claros.
-
-## UI de comprovantes
-
-- informar que comprovantes são excluídos ao finalizar;
-- ocultar preview após fechamento;
-- mostrar mensagem correta após fechamento.
-
-## Dados sensíveis
-
-- não usar telefone real como placeholder;
-- não expor CPF;
-- não exibir tokens;
-- não logar dados sensíveis no console.
+- OVERVIEW.md
+- ARCHITECTURE.md
+- BACKEND.md
+- FRONTEND.md
+- FLOWS.md
+- SECURITY.md (complementar ao existente, se necessário)
+- PATTERNS.md
+- DECISIONS.md
+- ROADMAP.md
 
 ---
 
-# 3. Corrigir problemas encontrados
+# 1. OVERVIEW.md
 
-Se encontrar problemas objetivos, corrija.
+Conteúdo:
 
-Exemplos de correções permitidas:
-
-- remover token por query/body;
-- corrigir mensagem de erro;
-- esconder campo indevido;
-- remover console.log sensível;
-- ajustar teste quebrado;
-- corrigir doc desatualizada;
-- ajustar README;
-- ajustar CORS/env example;
-- ajustar texto de privacidade/comprovantes.
-
-Não fazer:
-
-- refactor grande;
-- mudança visual ampla;
-- nova feature;
-- troca de arquitetura;
-- deploy;
-- integração externa nova.
+- Nome do projeto
+- Descrição do sistema (cobrança compartilhada)
+- Problema que resolve
+- Público alvo
+- Principais funcionalidades:
+    - criação de cobrança
+    - link público
+    - validação de participante
+    - envio de comprovante
+    - aprovação/rejeição
+    - fechamento da cobrança
+- Diferenciais do sistema:
+    - fluxo público seguro com token
+    - validação completa frontend/backend
+    - exclusão automática de comprovantes
+    - modo demonstração
 
 ---
 
-# 4. README.md
+# 2. ARCHITECTURE.md
 
-Reescrever o README.md para manter apenas o necessário para rodar localmente.
+Explicar:
 
-O README deve conter:
+## Backend
 
-## Nome do projeto
+- Laravel
+- organização em:
+    - Controllers
+    - Requests
+    - Services
+    - Actions
+    - Resources
+    - Support
+    - Rules
 
-ContaCerta ou nome atual do projeto.
+## Frontend
 
-## Requisitos
+- React + Vite
+- organização por:
+    - pages
+    - components
+    - lib
+    - api
 
-- Docker e Docker Compose;
-- Node.js/npm, se o frontend roda fora do container;
-- PHP Composer apenas se houver modo sem Docker.
+## Comunicação
 
-## Como rodar local com Docker
+- REST API
+- padrão de resposta (ApiResponse)
 
-Passos claros:
+## Storage
 
-1. Copiar env:
-   cp .env.example .env
+- arquivos privados
+- organização por expense
 
-2. Subir containers:
-   docker compose up -d --build
+## Fluxo público
 
-3. Instalar dependências backend, se necessário:
-   docker compose exec app composer install
-
-4. Gerar chave:
-   docker compose exec app php artisan key:generate
-
-5. Rodar migrations:
-   docker compose exec app php artisan migrate
-
-6. Rodar frontend:
-   cd frontend
-   npm install
-   npm run dev
-
-7. Acessar:
-
-- API/Laravel: http://localhost:8000 ou porta correta do projeto
-- Frontend/Vite: http://localhost:5173
-- phpMyAdmin, se existir apenas no dev
-
-## Testes
-
-Backend:
-docker compose run --rm app php artisan test
-
-Frontend:
-cd frontend
-npm run test
-
-Build:
-cd frontend
-npm run build
-
-## Observações locais
-
-- comprovantes ficam em storage privado local;
-- modo demo disponível para visitante;
-- criação pública, se estiver em standby, documentar;
-- não colocar instruções de produção/deploy no README.
-
-Remover do README:
-
-- detalhes longos de arquitetura;
-- roadmap;
-- documentação de produção;
-- instruções AWS;
-- checklist de segurança;
-- explicações extensas de API;
-- textos duplicados que já estão em doc/.
-
-Se necessário, mover detalhes para:
-
-- doc/API.md
-- doc/SECURITY.md
-- doc/PRODUCTION_CHECKLIST.md
-- doc/BACKEND.md
-- doc/FRONTEND.md
+- uso de public_hash
+- uso de manage_token
 
 ---
 
-# 5. Documentação auxiliar
+# 3. BACKEND.md
 
-Atualizar apenas se necessário:
+Detalhar:
 
-- doc/SECURITY.md:
-    - comprovantes temporários;
-    - manage_token;
-    - storage privado;
-    - CPF não coletado;
-    - erros e validações.
+- estrutura de pastas
+- responsabilidades de cada camada:
+    - Controller → entrada HTTP
+    - Request → validação
+    - Service → regras de negócio
+    - Action → operações específicas
+    - Resource → saída da API
+    - Support → utilitários
+    - Rules → validações reutilizáveis
 
-- doc/API.md:
-    - se algum contrato tiver mudado.
+## Modelagem
 
-- doc/PRODUCTION_CHECKLIST.md:
-    - se README tinha algo de produção que foi removido e precisa ficar lá.
+- Expense
+- Charge
+- PaymentProof
+- User
 
----
+## Regras importantes:
 
-# 6. Testes obrigatórios
-
-Depois das alterações, executar:
-
-docker compose run --rm app php artisan test
-cd frontend && npm run test
-cd frontend && npm run build
-
-Se algum comando falhar:
-
-- não esconder;
-- explicar o erro;
-- apontar o arquivo/causa provável.
+- soma >= total
+- estados de cobrança
+- lifecycle do comprovante
 
 ---
 
-# 7. Entrega final
+# 4. FRONTEND.md
 
-Entregar relatório em Markdown com:
+Detalhar:
 
-1. Resumo do review de segurança.
-2. Problemas encontrados.
-3. Problemas corrigidos.
-4. Arquivos alterados.
-5. Como ficou o README.
-6. Testes executados e resultado.
-7. Riscos restantes.
-8. Status final:
-    - aprovado;
-    - aprovado com ressalvas;
-    - bloqueado.
+- organização do projeto
+- fluxo de autenticação
+- fluxo de demo
+- tratamento de erros
+- validação por etapa
+- máscaras (telefone, moeda)
+
+## UX
+
+- sem alert()
+- erros por campo
+- mensagens PT-BR
+- feedback de diferença (faltante/excedente)
+
+---
+
+# 5. FLOWS.md
+
+Explicar passo a passo:
+
+## Fluxos principais:
+
+1. Criar cobrança
+2. Adicionar participantes
+3. Acessar link público
+4. Validar participante
+5. Enviar comprovante
+6. Rejeitar comprovante
+7. Reenviar comprovante
+8. Validar pagamento
+9. Fechar cobrança
+
+Para cada fluxo:
+
+- endpoints envolvidos
+- arquivos principais
+- regras de negócio
+- estados
+
+---
+
+# 6. PATTERNS.md
+
+Identificar padrões reais usados:
+
+- Service Layer
+- Action Pattern
+- Form Request Validation
+- API Resource
+- Rule Objects
+- Separation of concerns
+
+Explicar:
+
+- onde estão no código
+- por que foram usados
+- benefícios
+
+---
+
+# 7. SECURITY.md (complementar)
+
+Garantir que esteja documentado:
+
+- token de autenticação
+- manage_token via header
+- rate limiting
+- headers de segurança
+- CORS
+- storage privado
+- upload seguro
+- exclusão de comprovantes
+- CPF não coletado
+- LGPD (mínimo)
+
+---
+
+# 8. DECISIONS.md
+
+Aqui é MUITO importante.
+
+Documentar decisões técnicas:
+
+## Exemplos:
+
+- uso de localStorage para token (trade-off)
+- manage_token para fluxo público
+- exclusão de comprovantes após fechamento
+- não usar CPF
+- validação dupla (frontend + backend)
+- permitir valor excedente
+- UX sem alert()
+
+Para cada decisão:
+
+- contexto
+- decisão tomada
+- alternativa descartada
+- trade-offs
+
+---
+
+# 9. ROADMAP.md
+
+Futuras melhorias:
+
+## Segurança
+
+- cookies HttpOnly
+- auditoria
+- logs estruturados
+
+## Backend
+
+- fila (queues)
+- notificações async
+- integração com WhatsApp/email
+
+## Infra
+
+- S3
+- CI/CD completo
+- monitoramento
+
+## Produto
+
+- dashboard melhor
+- relatórios
+- multi-empresa
+
+---
+
+# Formato
+
+- Markdown organizado
+- títulos claros
+- exemplos quando necessário
+- evitar texto genérico
+- citar arquivos reais sempre que possível
+
+---
+
+# Entrega final
+
+- lista de arquivos criados
+- resumo do conteúdo
+- se algum ponto não foi encontrado no código

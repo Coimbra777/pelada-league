@@ -1,35 +1,104 @@
-# Security Notes
+# Segurança
 
 ## Autenticação
 
-- A API autenticada usa Sanctum com Bearer token.
-- A expiração do token é configurável por `SANCTUM_TOKEN_EXPIRATION_MINUTES`.
+- A API autenticada usa Laravel Sanctum com Bearer token.
+- A expiração é configurável por `SANCTUM_TOKEN_EXPIRATION_MINUTES`.
 - `POST /api/v1/auth/logout` revoga o token atual.
-- Respostas 401 da API usam o código estável `UNAUTHENTICATED`.
+- Falhas de autenticação da API retornam `UNAUTHENTICATED`.
 
-## Manage Token
+### Observação de trade-off
 
-- O token de gestão pública é aceito somente pelo header `X-Manage-Token`.
-- Query string e body não são aceitos para autenticação de gestão.
-- Links de gestão usam fragmento `#manage=` para evitar envio do token ao servidor.
+O frontend armazena o token em `localStorage`. Isso simplifica a SPA no MVP, mas não oferece o mesmo nível de proteção de cookies HttpOnly.
 
-## Comprovantes
+## Autorização
 
-- Os comprovantes usam storage privado (`local`).
-- O backend valida extensão declarada e conteúdo real por magic bytes.
-- O limite atual de upload é 5 MB.
-- O path segue o padrão `payment-proofs/expense-{expense_id}/{phone_normalized}-{timestamp}.{ext}`.
-- Reenvio após rejeição remove o arquivo anterior.
-- Ao fechar a despesa, todos os comprovantes são removidos e `file_path` vira `null`.
+### Área autenticada
 
-## Minimização de dados
+- O usuário só lista e consulta despesas criadas por ele.
+- Validação e rejeição autenticadas passam por `ExpenseAuthorizer`.
 
-- CPF não é coletado nem exposto pela API autenticada.
-- Sem token de gestão, a API pública não expõe lista de participantes, nome do organizador ou telefone do organizador.
-- Comprovantes deixam de ficar acessíveis depois do fechamento da despesa.
+### Área pública
 
-## Headers e limites
+- O visitante sem token recebe apenas resumo da cobrança.
+- A gestão pública exige `X-Manage-Token`.
+- O token de gestão não é aceito por query string nem body.
 
-- A API envia `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` e CSP.
-- HSTS é enviado somente em produção com HTTPS.
-- Login, leitura pública, ações públicas e downloads possuem rate limiting dedicado.
+## `manage_token`
+
+- Existe por despesa pública
+- É resolvido por `ManageTokenResolver`
+- O link de gestão usa fragmento `#manage=` para evitar envio ao servidor
+- O frontend persiste o token localmente por hash da despesa
+
+## Uploads e comprovantes
+
+- O storage é privado (`local`)
+- O backend aceita somente `jpg`, `png` e `pdf`
+- Há validação por extensão, MIME declarado e magic bytes
+- O limite atual é 5 MB
+- O nome do arquivo usa telefone normalizado + timestamp
+- O path é organizado por despesa
+- O reenvio após rejeição remove o arquivo anterior
+- A rejeição sozinha não apaga o comprovante
+- O fechamento da despesa apaga todos os comprovantes e zera `file_path`
+- Preview/download após fechamento retornam `PROOF_REMOVED_AFTER_EXPENSE_CLOSED`
+
+## Headers de segurança
+
+O middleware `SecurityHeaders` adiciona:
+
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy`
+- `Content-Security-Policy`
+
+HSTS é enviado apenas em produção com HTTPS.
+
+## Rate limiting
+
+Há limitadores específicos para:
+
+- login
+- registro
+- visualização pública
+- validação pública do participante
+- envio de comprovante
+- mutações públicas sensíveis
+- preview/download de comprovantes
+
+## CORS
+
+- configurado em `config/cors.php`
+- origens controladas por `CORS_ALLOWED_ORIGINS`
+- `supports_credentials` está como `false`
+
+## Validações
+
+O projeto valida no backend:
+
+- telefone brasileiro
+- data de vencimento
+- valor total
+- valor por participante
+- obrigatoriedade de campos
+- soma dos participantes `>= total`
+
+As mensagens foram adaptadas para PT-BR.
+
+## LGPD mínima
+
+Pontos já visíveis no código:
+
+- CPF não é coletado no cadastro
+- CPF não é exposto em `UserResource`
+- visitante público não vê lista completa de participantes
+- visitante público não vê nome/telefone do organizador
+- comprovantes são temporários e removidos ao fechar a despesa
+
+## Riscos residuais do MVP
+
+- token autenticado em `localStorage`
+- `manage_token` também fica persistido no navegador
+- login distingue e-mail inexistente de senha inválida por decisão de UX
